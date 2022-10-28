@@ -185,13 +185,6 @@
 //! [Proxy]: ./struct.Proxy.html
 //! [cargo-features]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section
 
-macro_rules! if_hyper {
-    ($($item:item)*) => {$(
-        #[cfg(not(target_arch = "wasm32"))]
-        $item
-    )*}
-}
-
 pub use http::header;
 pub use http::Method;
 pub use http::{StatusCode, Version};

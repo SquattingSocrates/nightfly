@@ -942,7 +942,6 @@ fn parse_registry_values(registry_values: RegistryProxyValues) -> SystemProxyMap
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     impl Dst for Url {
         fn scheme(&self) -> &str {
@@ -1077,9 +1076,6 @@ mod tests {
             other => panic!("unexpected: {:?}", other),
         }
     }
-
-    // Smallest possible content for a mutex
-    struct MutexInner;
 
     #[test]
     fn test_get_sys_proxies_parsing() {

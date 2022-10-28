@@ -8,9 +8,6 @@ use flate2::read::ZlibDecoder;
 #[cfg(feature = "gzip")]
 use flate2::read::GzDecoder;
 
-#[cfg(feature = "brotli")]
-use brotli::BrotliDecompress;
-
 use http::HeaderMap;
 
 use httparse::{Status, EMPTY_HEADER};

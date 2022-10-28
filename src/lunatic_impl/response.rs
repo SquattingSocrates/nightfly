@@ -16,11 +16,9 @@ use serde::de::DeserializeOwned;
 use serde_json;
 use url::Url;
 
-use super::body::Body;
-use super::decoder::{Accepts, Decoder};
+use super::decoder::Accepts;
 #[cfg(feature = "cookies")]
 use crate::cookie;
-use crate::response::ResponseUrl;
 
 /// Extra information about the transport when an HttpConnector is used.
 ///

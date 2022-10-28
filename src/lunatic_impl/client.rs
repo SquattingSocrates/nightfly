@@ -7,19 +7,12 @@ use std::time::Duration;
 use std::{collections::HashMap, convert::TryInto, net::SocketAddr};
 use std::{fmt, str};
 
-use bytes::Bytes;
 use http::header::{
-    self, Entry, HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH,
-    CONTENT_TYPE, LOCATION, PROXY_AUTHORIZATION, RANGE, REFERER, TRANSFER_ENCODING, USER_AGENT,
+    self, Entry, HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, PROXY_AUTHORIZATION, RANGE,
+    USER_AGENT,
 };
 use http::uri::Scheme;
 use http::{Uri, Version};
-use lunatic::net::TcpStream;
-#[cfg(feature = "native-tls-crate")]
-use native_tls_crate::TlsConnector;
-
-use lunatic_log::{debug, trace};
-use serde::{Deserialize, Serialize};
 
 use super::decoder::{parse_response, Accepts};
 use super::http_stream::HttpStream;
@@ -30,15 +23,15 @@ use crate::connect::{Connector, HttpConnector};
 #[cfg(feature = "cookies")]
 use crate::cookie;
 use crate::error;
-use crate::into_url::{expect_uri, try_uri};
-use crate::redirect::{self, remove_sensitive_headers};
+use crate::into_url::expect_uri;
+use crate::redirect::{self};
 #[cfg(feature = "__tls")]
 use crate::tls::{self, TlsBackend};
 #[cfg(feature = "__tls")]
 use crate::Certificate;
 #[cfg(any(feature = "native-tls", feature = "__rustls"))]
 use crate::Identity;
-use crate::{IntoUrl, Method, Proxy, StatusCode, Url};
+use crate::{IntoUrl, Method, Proxy, Url};
 
 /// An asynchronous `Client` to make Requests with.
 ///
