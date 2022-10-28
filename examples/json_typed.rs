@@ -38,7 +38,7 @@ struct AnythingResponse<T> {
 fn main(_: Mailbox<()>) -> Result<(), nightfly::Error> {
     let new_post = Post {
         id: None,
-        title: "Reqwest.rs".into(),
+        title: "Nightfly.rs".into(),
         body: "https://docs.rs/nightfly".into(),
         user_id: 1,
     };
@@ -55,7 +55,7 @@ fn main(_: Mailbox<()>) -> Result<(), nightfly::Error> {
     //     id: Some(
     //         101
     //     ),
-    //     title: "Reqwest.rs",
+    //     title: "Nightfly.rs",
     //     body: "https://docs.rs/nightfly",
     //     user_id: 1
     // }

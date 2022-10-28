@@ -16,7 +16,7 @@ use http::{Uri, Version};
 
 use super::decoder::{parse_response, Accepts};
 use super::http_stream::HttpStream;
-use super::request::{Request, RequestBuilder};
+use super::request::{PendingRequest, Request, RequestBuilder};
 use super::response::HttpResponse;
 use super::Body;
 use crate::connect::{Connector, HttpConnector};
@@ -48,7 +48,17 @@ use crate::{IntoUrl, Method, Proxy, Url};
 /// [`Rc`]: std::rc::Rc
 #[derive(Clone)]
 pub struct Client {
-    inner: ClientRef,
+    accepts: Accepts,
+    #[cfg(feature = "cookies")]
+    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
+    pub(crate) headers: HeaderMap,
+    pub(crate) redirect_policy: redirect::Policy,
+    pub(crate) referer: bool,
+    pub(crate) request_timeout: Option<Duration>,
+    pub(crate) proxies: Arc<Vec<Proxy>>,
+    pub(crate) proxies_maybe_http_auth: bool,
+    pub(crate) https_only: bool,
+    pub(crate) stream: Option<HttpStream>,
 }
 
 /// A `ClientBuilder` can be used to create a `Client` with custom configuration.
@@ -504,20 +514,17 @@ impl ClientBuilder {
         let proxies_maybe_http_auth = proxies.iter().any(|p| p.maybe_has_http_auth());
 
         Ok(Client {
-            inner: ClientRef {
-                accepts: config.accepts,
-                #[cfg(feature = "cookies")]
-                cookie_store: config.cookie_store,
-                headers: config.headers,
-                // redirect_policy: config.redirect_policy,
-                referer: config.referer,
-                request_timeout: config.timeout,
-                proxies,
-                proxies_maybe_http_auth,
-                https_only: config.https_only,
-                // stream: ,
-                stream: None,
-            },
+            accepts: config.accepts,
+            #[cfg(feature = "cookies")]
+            cookie_store: config.cookie_store,
+            headers: config.headers,
+            redirect_policy: config.redirect_policy,
+            referer: config.referer,
+            request_timeout: config.timeout,
+            proxies,
+            proxies_maybe_http_auth,
+            https_only: config.https_only,
+            stream: None,
         })
     }
 
@@ -1471,17 +1478,65 @@ impl Client {
     /// This method fails if there was an error while sending request,
     /// redirect loop was detected or redirect limit was exhausted.
     pub fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
-        self.execute_request(request)
+        self.execute_request(request, vec![])
     }
 
-    pub(super) fn execute_request(&mut self, req: Request) -> Result<HttpResponse, crate::Error> {
+    pub(crate) fn accepts(&self) -> Accepts {
+        self.accepts.clone()
+    }
+
+    /// ensures connection
+    pub fn ensure_connection(&mut self, url: Url) -> crate::Result<HttpStream> {
+        if let Some(stream) = &self.stream {
+            return Ok(stream.clone());
+        }
+        HttpStream::connect(url)
+    }
+
+    fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
+        // Instead of deriving Debug, only print fields when their output
+        // would provide relevant or interesting data.
+
+        #[cfg(feature = "cookies")]
+        {
+            if let Some(_) = self.cookie_store {
+                f.field("cookie_store", &true);
+            }
+        }
+
+        f.field("accepts", &self.accepts);
+
+        if !self.proxies.is_empty() {
+            f.field("proxies", &self.proxies);
+        }
+
+        // if !self.redirect_policy.is_default() {
+        //     f.field("redirect_policy", &self.redirect_policy);
+        // }
+
+        if self.referer {
+            f.field("referer", &true);
+        }
+
+        f.field("default_headers", &self.headers);
+
+        if let Some(ref d) = self.request_timeout {
+            f.field("timeout", d);
+        }
+    }
+
+    pub(super) fn execute_request(
+        &mut self,
+        req: Request,
+        urls: Vec<Url>,
+    ) -> Result<HttpResponse, crate::Error> {
         let (method, url, mut headers, body, timeout, version) = req.clone().pieces();
         if url.scheme() != "http" && url.scheme() != "https" {
             return Err(error::url_bad_scheme(url));
         }
 
         // check if we're in https_only mode and check the scheme of the current URL
-        if self.inner.https_only && url.scheme() != "https" {
+        if self.https_only && url.scheme() != "https" {
             return Err(error::url_bad_scheme(url));
         }
 
@@ -1491,7 +1546,7 @@ impl Client {
 
         // insert default headers in the request headers
         // without overwriting already appended headers.
-        for (key, value) in &self.inner.headers {
+        for (key, value) in &self.headers {
             if let Entry::Vacant(entry) = headers.entry(key) {
                 entry.insert(value.clone());
             }
@@ -1507,7 +1562,7 @@ impl Client {
             }
         }
 
-        let accept_encoding = self.inner.accepts.as_str();
+        let accept_encoding = self.accepts.as_str();
 
         if let Some(accept_encoding) = accept_encoding {
             if !headers.contains_key(ACCEPT_ENCODING) && !headers.contains_key(RANGE) {
@@ -1519,34 +1574,28 @@ impl Client {
 
         self.proxy_auth(&uri, &mut headers);
 
-        let timeout = timeout.or(self.inner.request_timeout);
+        let timeout = timeout.or(self.request_timeout);
 
         // *req.headers_mut() = headers.clone();
 
-        // let in_flight = self.inner.hyper.request(req);
+        // let in_flight = self.hyper.request(req);
 
         let mut encoded = request_to_vec(method, url.clone(), headers, body, version);
 
-        let mut stream = self.inner.ensure_connection(url.clone())?;
+        let mut stream = self.ensure_connection(url.clone())?;
 
         stream.write_all(&mut encoded).unwrap();
 
         let response_buffer = Vec::new();
 
-        match parse_response(
-            response_buffer,
-            stream.clone(),
-            url,
-            req,
-            self.inner.accepts.clone(),
-        ) {
-            Ok(res) => Ok(res),
+        match parse_response(response_buffer, stream.clone(), url, req.clone(), self) {
+            Ok(res) => PendingRequest::new(res, self, req, urls).resolve(),
             Err(e) => unimplemented!(),
         }
     }
 
     fn proxy_auth(&self, dst: &Uri, headers: &mut HeaderMap) {
-        if !self.inner.proxies_maybe_http_auth {
+        if !self.proxies_maybe_http_auth {
             return;
         }
 
@@ -1561,7 +1610,7 @@ impl Client {
             return;
         }
 
-        for proxy in self.inner.proxies.iter() {
+        for proxy in self.proxies.iter() {
             if proxy.is_match(dst) {
                 if let Some(header) = proxy.http_basic_auth(dst) {
                     headers.insert(PROXY_AUTHORIZATION, header);
@@ -1576,7 +1625,7 @@ impl Client {
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut builder = f.debug_struct("Client");
-        self.inner.fmt_fields(&mut builder);
+        self.fmt_fields(&mut builder);
         builder.finish()
     }
 }
@@ -1682,87 +1731,6 @@ impl Config {
     }
 }
 
-#[derive(Clone)]
-struct ClientRef {
-    accepts: Accepts,
-    #[cfg(feature = "cookies")]
-    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
-    headers: HeaderMap,
-    // redirect_policy: redirect::Policy,
-    referer: bool,
-    request_timeout: Option<Duration>,
-    proxies: Arc<Vec<Proxy>>,
-    proxies_maybe_http_auth: bool,
-    https_only: bool,
-    stream: Option<HttpStream>,
-}
-
-impl ClientRef {
-    pub fn ensure_connection(&mut self, url: Url) -> crate::Result<HttpStream> {
-        if let Some(stream) = &self.stream {
-            return Ok(stream.clone());
-        }
-        HttpStream::connect(url)
-    }
-
-    fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
-        // Instead of deriving Debug, only print fields when their output
-        // would provide relevant or interesting data.
-
-        #[cfg(feature = "cookies")]
-        {
-            if let Some(_) = self.cookie_store {
-                f.field("cookie_store", &true);
-            }
-        }
-
-        f.field("accepts", &self.accepts);
-
-        if !self.proxies.is_empty() {
-            f.field("proxies", &self.proxies);
-        }
-
-        // if !self.redirect_policy.is_default() {
-        //     f.field("redirect_policy", &self.redirect_policy);
-        // }
-
-        if self.referer {
-            f.field("referer", &true);
-        }
-
-        f.field("default_headers", &self.headers);
-
-        if let Some(ref d) = self.request_timeout {
-            f.field("timeout", d);
-        }
-    }
-}
-
-// enum PendingInner {
-//     Request(PendingRequest),
-//     Error(Option<crate::Error>),
-// }
-
-// pin_project! {
-//     struct PendingRequest {
-//         method: Method,
-//         url: Url,
-//         headers: HeaderMap,
-//         body: Option<Option<Bytes>>,
-
-//         urls: Vec<Url>,
-
-//         retry_count: usize,
-
-//         client: Arc<ClientRef>,
-
-//         #[pin]
-//         in_flight: ResponseFuture,
-//         #[pin]
-//         timeout: Option<Pin<Box<Sleep>>>,
-//     }
-// }
-
 // impl PendingRequest {
 //     fn in_flight(self: Pin<&mut Self>) -> Pin<&mut ResponseFuture> {
 //         self.project().in_flight
@@ -1828,205 +1796,6 @@ impl ClientRef {
 //     }
 //     false
 // }
-
-// impl Pending {
-//     pub(super) fn new_err(err: crate::Error) -> Pending {
-//         Pending {
-//             inner: PendingInner::Error(Some(err)),
-//         }
-//     }
-
-//     fn inner(self: Pin<&mut Self>) -> Pin<&mut PendingInner> {
-//         self.project().inner
-//     }
-// }
-
-// impl Future for Pending {
-//     type Output = Result<Response, crate::Error>;
-
-//     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         let inner = self.inner();
-//         match inner.get_mut() {
-//             PendingInner::Request(ref mut req) => Pin::new(req).poll(cx),
-//             PendingInner::Error(ref mut err) => Poll::Ready(Err(err
-//                 .take()
-//                 .expect("Pending error polled more than once"))),
-//         }
-//     }
-// }
-
-// impl Future for PendingRequest {
-//     type Output = Result<Response, crate::Error>;
-
-//     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         if let Some(delay) = self.as_mut().timeout().as_mut().as_pin_mut() {
-//             if let Poll::Ready(()) = delay.poll(cx) {
-//                 return Poll::Ready(Err(
-//                     crate::error::request(crate::error::TimedOut).with_url(self.url.clone())
-//                 ));
-//             }
-//         }
-
-//         loop {
-//             let res = match self.as_mut().in_flight().as_mut().poll(cx) {
-//                 Poll::Ready(Err(e)) => {
-//                     if self.as_mut().retry_error(&e) {
-//                         continue;
-//                     }
-//                     return Poll::Ready(Err(crate::error::request(e).with_url(self.url.clone())));
-//                 }
-//                 Poll::Ready(Ok(res)) => res,
-//                 Poll::Pending => return Poll::Pending,
-//             };
-
-//             #[cfg(feature = "cookies")]
-//             {
-//                 if let Some(ref cookie_store) = self.client.cookie_store {
-//                     let mut cookies =
-//                         cookie::extract_response_cookie_headers(&res.headers()).peekable();
-//                     if cookies.peek().is_some() {
-//                         cookie_store.set_cookies(&mut cookies, &self.url);
-//                     }
-//                 }
-//             }
-//             let should_redirect = match res.status() {
-//                 StatusCode::MOVED_PERMANENTLY | StatusCode::FOUND | StatusCode::SEE_OTHER => {
-//                     self.body = None;
-//                     for header in &[
-//                         TRANSFER_ENCODING,
-//                         CONTENT_ENCODING,
-//                         CONTENT_TYPE,
-//                         CONTENT_LENGTH,
-//                     ] {
-//                         self.headers.remove(header);
-//                     }
-
-//                     match self.method {
-//                         Method::GET | Method::HEAD => {}
-//                         _ => {
-//                             self.method = Method::GET;
-//                         }
-//                     }
-//                     true
-//                 }
-//                 StatusCode::TEMPORARY_REDIRECT | StatusCode::PERMANENT_REDIRECT => {
-//                     match self.body {
-//                         Some(Some(_)) | None => true,
-//                         Some(None) => false,
-//                     }
-//                 }
-//                 _ => false,
-//             };
-//             if should_redirect {
-//                 let loc = res.headers().get(LOCATION).and_then(|val| {
-//                     let loc = (|| -> Option<Url> {
-//                         // Some sites may send a utf-8 Location header,
-//                         // even though we're supposed to treat those bytes
-//                         // as opaque, we'll check specifically for utf8.
-//                         self.url.join(str::from_utf8(val.as_bytes()).ok()?).ok()
-//                     })();
-
-//                     // Check that the `url` is also a valid `http::Uri`.
-//                     //
-//                     // If not, just log it and skip the redirect.
-//                     let loc = loc.and_then(|url| {
-//                         if try_uri(&url).is_some() {
-//                             Some(url)
-//                         } else {
-//                             None
-//                         }
-//                     });
-
-//                     if loc.is_none() {
-//                         debug!("Location header had invalid URI: {:?}", val);
-//                     }
-//                     loc
-//                 });
-//                 if let Some(loc) = loc {
-//                     if self.client.referer {
-//                         if let Some(referer) = make_referer(&loc, &self.url) {
-//                             self.headers.insert(REFERER, referer);
-//                         }
-//                     }
-//                     let url = self.url.clone();
-//                     self.as_mut().urls().push(url);
-//                     let action = self
-//                         .client
-//                         .redirect_policy
-//                         .check(res.status(), &loc, &self.urls);
-
-//                     match action {
-//                         redirect::ActionKind::Follow => {
-//                             debug!("redirecting '{}' to '{}'", self.url, loc);
-
-//                             if self.client.https_only && loc.scheme() != "https" {
-//                                 return Poll::Ready(Err(error::redirect(
-//                                     error::url_bad_scheme(loc.clone()),
-//                                     loc,
-//                                 )));
-//                             }
-
-//                             self.url = loc;
-//                             let mut headers =
-//                                 std::mem::replace(self.as_mut().headers(), HeaderMap::new());
-
-//                             remove_sensitive_headers(&mut headers, &self.url, &self.urls);
-//                             let uri = expect_uri(&self.url);
-//                             let body = match self.body {
-//                                 Some(Some(ref body)) => Body::reusable(body.clone()),
-//                                 _ => Body::empty(),
-//                             };
-//                             let mut req = hyper::Request::builder()
-//                                 .method(self.method.clone())
-//                                 .uri(uri.clone())
-//                                 .body(body.into_stream())
-//                                 .expect("valid request parts");
-
-//                             // Add cookies from the cookie store.
-//                             #[cfg(feature = "cookies")]
-//                             {
-//                                 if let Some(ref cookie_store) = self.client.cookie_store {
-//                                     add_cookie_header(&mut headers, &**cookie_store, &self.url);
-//                                 }
-//                             }
-
-//                             *req.headers_mut() = headers.clone();
-//                             std::mem::swap(self.as_mut().headers(), &mut headers);
-//                             *self.as_mut().in_flight().get_mut() = self.client.hyper.request(req);
-//                             continue;
-//                         }
-//                         redirect::ActionKind::Stop => {
-//                             debug!("redirect policy disallowed redirection to '{}'", loc);
-//                         }
-//                         redirect::ActionKind::Error(err) => {
-//                             return Poll::Ready(Err(crate::error::redirect(err, self.url.clone())));
-//                         }
-//                     }
-//                 }
-//             }
-
-//             let res = Response::new(
-//                 res,
-//                 self.url.clone(),
-//                 self.client.accepts,
-//                 self.timeout.take(),
-//             );
-//             return Poll::Ready(Ok(res));
-//         }
-//     }
-// }
-
-fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
-    if next.scheme() == "http" && previous.scheme() == "https" {
-        return None;
-    }
-
-    let mut referer = previous.clone();
-    let _ = referer.set_username("");
-    let _ = referer.set_password(None);
-    referer.set_fragment(None);
-    referer.as_str().parse().ok()
-}
 
 #[cfg(feature = "cookies")]
 fn add_cookie_header(headers: &mut HeaderMap, cookie_store: &dyn cookie::CookieStore, url: &Url) {

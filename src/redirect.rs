@@ -21,6 +21,7 @@ use crate::Url;
 ///   the allowed maximum redirect hops in a chain.
 /// - `none` can be used to disable all redirect behavior.
 /// - `custom` can be used to create a customized policy.
+#[derive(Clone)]
 pub struct Policy {
     inner: PolicyKind,
 }
@@ -57,52 +58,52 @@ impl Policy {
         }
     }
 
-    /// Create a custom `Policy` using the passed function.
-    ///
-    /// # Note
-    ///
-    /// The default `Policy` handles a maximum loop
-    /// chain, but the custom variant does not do that for you automatically.
-    /// The custom policy should have some way of handling those.
-    ///
-    /// Information on the next request and previous requests can be found
-    /// on the [`Attempt`] argument passed to the closure.
-    ///
-    /// Actions can be conveniently created from methods on the
-    /// [`Attempt`].
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// # use nightfly::{Error, redirect};
-    /// #
-    /// # fn run() -> Result<(), Error> {
-    /// let custom = redirect::Policy::custom(|attempt| {
-    ///     if attempt.previous().len() > 5 {
-    ///         attempt.error("too many redirects")
-    ///     } else if attempt.url().host_str() == Some("example.domain") {
-    ///         // prevent redirects to 'example.domain'
-    ///         attempt.stop()
-    ///     } else {
-    ///         attempt.follow()
-    ///     }
-    /// });
-    /// let client = nightfly::Client::builder()
-    ///     .redirect(custom)
-    ///     .build()?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// [`Attempt`]: struct.Attempt.html
-    pub fn custom<T>(policy: T) -> Self
-    where
-        T: Fn(Attempt) -> Action + Send + Sync + 'static,
-    {
-        Self {
-            inner: PolicyKind::Custom(Box::new(policy)),
-        }
-    }
+    // /// Create a custom `Policy` using the passed function.
+    // ///
+    // /// # Note
+    // ///
+    // /// The default `Policy` handles a maximum loop
+    // /// chain, but the custom variant does not do that for you automatically.
+    // /// The custom policy should have some way of handling those.
+    // ///
+    // /// Information on the next request and previous requests can be found
+    // /// on the [`Attempt`] argument passed to the closure.
+    // ///
+    // /// Actions can be conveniently created from methods on the
+    // /// [`Attempt`].
+    // ///
+    // /// # Example
+    // ///
+    // /// ```rust
+    // /// # use nightfly::{Error, redirect};
+    // /// #
+    // /// # fn run() -> Result<(), Error> {
+    // /// let custom = redirect::Policy::custom(|attempt| {
+    // ///     if attempt.previous().len() > 5 {
+    // ///         attempt.error("too many redirects")
+    // ///     } else if attempt.url().host_str() == Some("example.domain") {
+    // ///         // prevent redirects to 'example.domain'
+    // ///         attempt.stop()
+    // ///     } else {
+    // ///         attempt.follow()
+    // ///     }
+    // /// });
+    // /// let client = nightfly::Client::builder()
+    // ///     .redirect(custom)
+    // ///     .build()?;
+    // /// # Ok(())
+    // /// # }
+    // /// ```
+    // ///
+    // /// [`Attempt`]: struct.Attempt.html
+    // pub fn custom<T>(policy: T) -> Self
+    // where
+    //     T: Fn(Attempt) -> Action + Send + Sync + 'static,
+    // {
+    //     Self {
+    //         inner: PolicyKind::Custom(Box::new(policy)),
+    //     }
+    // }
 
     /// Apply this policy to a given [`Attempt`] to produce a [`Action`].
     ///
@@ -126,7 +127,7 @@ impl Policy {
     /// ```
     pub fn redirect(&self, attempt: Attempt) -> Action {
         match self.inner {
-            PolicyKind::Custom(ref custom) => custom(attempt),
+            // PolicyKind::Custom(ref custom) => custom(attempt),
             PolicyKind::Limit(max) => {
                 if attempt.previous.len() >= max {
                     attempt.error(TooManyRedirects)
@@ -200,8 +201,9 @@ impl<'a> Attempt<'a> {
     }
 }
 
+#[derive(Clone)]
 enum PolicyKind {
-    Custom(Box<dyn Fn(Attempt) -> Action + Send + Sync + 'static>),
+    // Custom(Box<dyn Fn(Attempt) -> Action + Send + Sync + 'static>),
     Limit(usize),
     None,
 }
@@ -215,7 +217,7 @@ impl fmt::Debug for Policy {
 impl fmt::Debug for PolicyKind {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            PolicyKind::Custom(..) => f.pad("Custom"),
+            // PolicyKind::Custom(..) => f.pad("Custom"),
             PolicyKind::Limit(max) => f.debug_tuple("Limit").field(&max).finish(),
             PolicyKind::None => f.pad("None"),
         }
@@ -289,28 +291,28 @@ fn test_redirect_policy_limit_to_0() {
     }
 }
 
-#[test]
-fn test_redirect_policy_custom() {
-    let policy = Policy::custom(|attempt| {
-        if attempt.url().host_str() == Some("foo") {
-            attempt.stop()
-        } else {
-            attempt.follow()
-        }
-    });
+// #[test]
+// fn test_redirect_policy_custom() {
+//     let policy = Policy::custom(|attempt| {
+//         if attempt.url().host_str() == Some("foo") {
+//             attempt.stop()
+//         } else {
+//             attempt.follow()
+//         }
+//     });
 
-    let next = Url::parse("http://bar/baz").unwrap();
-    match policy.check(StatusCode::FOUND, &next, &[]) {
-        ActionKind::Follow => (),
-        other => panic!("unexpected {:?}", other),
-    }
+//     let next = Url::parse("http://bar/baz").unwrap();
+//     match policy.check(StatusCode::FOUND, &next, &[]) {
+//         ActionKind::Follow => (),
+//         other => panic!("unexpected {:?}", other),
+//     }
 
-    let next = Url::parse("http://foo/baz").unwrap();
-    match policy.check(StatusCode::FOUND, &next, &[]) {
-        ActionKind::Stop => (),
-        other => panic!("unexpected {:?}", other),
-    }
-}
+//     let next = Url::parse("http://foo/baz").unwrap();
+//     match policy.check(StatusCode::FOUND, &next, &[]) {
+//         ActionKind::Stop => (),
+//         other => panic!("unexpected {:?}", other),
+//     }
+// }
 
 #[test]
 fn test_remove_sensitive_headers() {

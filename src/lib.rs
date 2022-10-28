@@ -19,14 +19,10 @@
 //! - Uses system-native [TLS](#tls)
 //! - Cookies
 //!
-//! The [`nightfly::Client`][client] is asynchronous. For applications wishing
-//! to only make a few HTTP requests, the [`nightfly::blocking`](blocking) API
-//! may be more convenient.
-//!
 //! Additional learning resources include:
 //!
 //! - [The Rust Cookbook](https://rust-lang-nursery.github.io/rust-cookbook/web/clients.html)
-//! - [Reqwest Repository Examples](https://github.com/seanmonstar/nightfly/tree/master/examples)
+//! - [Nightfly Repository Examples](https://github.com/SquattingSocrates/nightfly/tree/master/examples)
 //!
 //! ## Making a GET request
 //!

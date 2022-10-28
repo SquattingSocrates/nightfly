@@ -4,6 +4,8 @@ use std::io::Write;
 use std::time::Duration;
 
 use base64::write::EncoderWriter as Base64Encoder;
+use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, LOCATION, REFERER, TRANSFER_ENCODING};
+use http::{Response, StatusCode};
 use serde::Serialize;
 #[cfg(feature = "json")]
 use serde_json;
@@ -15,7 +17,9 @@ use super::response::HttpResponse;
 #[cfg(feature = "multipart")]
 use crate::header::CONTENT_LENGTH;
 use crate::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
-use crate::{Body, Method, Url};
+use crate::into_url::{expect_uri, try_uri};
+use crate::redirect::remove_sensitive_headers;
+use crate::{error, redirect, Body, Method, Url};
 use http::{request::Parts, Request as HttpRequest, Version};
 
 /// A request which can be executed with `Client::execute()`.
@@ -523,7 +527,7 @@ impl RequestBuilder {
     /// ```
     pub fn send(mut self) -> Result<HttpResponse, crate::Error> {
         match self.request {
-            Ok(req) => self.client.execute_request(req),
+            Ok(req) => self.client.execute_request(req, vec![]),
             Err(err) => Err(err),
         }
     }
@@ -664,15 +668,159 @@ impl TryFrom<Request> for HttpRequest<Body> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct PendingRequest<'a> {
+    /// parsed response
+    res: HttpResponse,
+    client: &'a mut Client,
+    req: Request,
+    urls: Vec<Url>,
+}
+
+impl<'a> PendingRequest<'a> {
+    pub fn new(res: HttpResponse, client: &'a mut Client, req: Request, urls: Vec<Url>) -> Self {
+        Self {
+            res,
+            client,
+            req,
+            urls,
+        }
+    }
+
+    /// return either a parsed
+    pub fn resolve(mut self) -> Result<HttpResponse, crate::Error> {
+        #[cfg(feature = "cookies")]
+        {
+            if let Some(ref cookie_store) = self.client.cookie_store {
+                let mut cookies =
+                    cookie::extract_response_cookie_headers(&res.headers()).peekable();
+                if cookies.peek().is_some() {
+                    cookie_store.set_cookies(&mut cookies, &self.url);
+                }
+            }
+        }
+        let should_redirect = match self.res.status() {
+            StatusCode::MOVED_PERMANENTLY | StatusCode::FOUND | StatusCode::SEE_OTHER => {
+                // self.body = None;
+                for header in &[
+                    TRANSFER_ENCODING,
+                    CONTENT_ENCODING,
+                    CONTENT_TYPE,
+                    CONTENT_LENGTH,
+                ] {
+                    self.res.headers.remove(header);
+                }
+                true
+            }
+            StatusCode::TEMPORARY_REDIRECT | StatusCode::PERMANENT_REDIRECT => true,
+            _ => false,
+        };
+        if should_redirect {
+            let loc = self.res.headers().get(LOCATION).and_then(|val| {
+                let loc = (|| -> Option<Url> {
+                    // Some sites may send a utf-8 Location header,
+                    // even though we're supposed to treat those bytes
+                    // as opaque, we'll check specifically for utf8.
+                    self.req
+                        .url
+                        .join(std::str::from_utf8(val.as_bytes()).ok()?)
+                        .ok()
+                })();
+
+                // Check that the `url` is also a valid `http::Uri`.
+                //
+                // If not, just log it and skip the redirect.
+                let loc = loc.and_then(|url| {
+                    if try_uri(&url).is_some() {
+                        Some(url)
+                    } else {
+                        None
+                    }
+                });
+
+                if loc.is_none() {
+                    lunatic_log::debug!("Location header had invalid URI: {:?}", val);
+                }
+                loc
+            });
+            if let Some(loc) = loc {
+                println!("GOT LOCATION {:?}", loc);
+                if self.client.referer {
+                    if let Some(referer) = make_referer(&loc, &self.req.url) {
+                        self.req.headers.insert(REFERER, referer);
+                    }
+                }
+                let url = self.req.url.clone();
+                self.urls.push(url.clone());
+                let action = self
+                    .client
+                    .redirect_policy
+                    .check(self.res.status(), &loc, &self.urls);
+
+                match action {
+                    redirect::ActionKind::Follow => {
+                        println!("redirecting '{}' to '{}'", self.req.url, loc);
+
+                        if self.client.https_only && loc.scheme() != "https" {
+                            return Err(error::redirect(error::url_bad_scheme(loc.clone()), loc));
+                        }
+
+                        self.req.url = loc;
+                        let mut headers =
+                            std::mem::replace(&mut self.req.headers, HeaderMap::new());
+
+                        remove_sensitive_headers(&mut headers, &self.req.url, &self.urls);
+                        let req = Request::new(self.req.method, self.req.url.clone());
+                        let mut req = RequestBuilder::new(self.client.clone(), Ok(req.clone()))
+                            .body(req.body.unwrap_or(().into()))
+                            .build()
+                            .expect("valid request parts");
+
+                        // Add cookies from the cookie store.
+                        #[cfg(feature = "cookies")]
+                        {
+                            if let Some(ref cookie_store) = self.client.cookie_store {
+                                add_cookie_header(&mut headers, &**cookie_store, &self.url);
+                            }
+                        }
+
+                        *req.headers_mut() = headers.clone();
+                        std::mem::swap(&mut self.req.headers, &mut headers);
+                        return self.client.execute_request(req, self.urls);
+                    }
+                    redirect::ActionKind::Stop => {
+                        lunatic_log::debug!("redirect policy disallowed redirection to '{}'", loc);
+                    }
+                    redirect::ActionKind::Error(err) => {
+                        return Err(crate::error::redirect(err, self.req.url.clone()));
+                    }
+                }
+            }
+        }
+
+        Ok(self.res)
+    }
+}
+
+fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
+    if next.scheme() == "http" && previous.scheme() == "https" {
+        return None;
+    }
+
+    let mut referer = previous.clone();
+    let _ = referer.set_username("");
+    let _ = referer.set_password(None);
+    referer.set_fragment(None);
+    referer.as_str().parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Client, HttpRequest, Request, Version};
-    use crate::Method;
+    use super::Client;
     use serde::Serialize;
     use std::collections::BTreeMap;
-    use std::convert::TryFrom;
 
-    #[test]
+    #[lunatic::test]
     fn add_query_append() {
         let client = Client::new();
         let some_url = "https://google.com/";

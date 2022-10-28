@@ -12,7 +12,7 @@ fn main(_: Mailbox<()>) -> Result<(), nightfly::Error> {
         // .post("https://jsonplaceholder.typicode.com/posts")
         .post("http://eu.httpbin.org/anything")
         .json(&serde_json::json!({
-            "title": "Reqwest.rs",
+            "title": "Nightfly.rs",
             "body": "https://docs.rs/nightfly",
             "userId": 1
         }))
@@ -31,7 +31,7 @@ fn main(_: Mailbox<()>) -> Result<(), nightfly::Error> {
     //             101
     //         ),
     //         "title": String(
-    //             "Reqwest.rs"
+    //             "Nightfly.rs"
     //         ),
     //         "userId": Number(
     //             1

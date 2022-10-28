@@ -19,6 +19,7 @@ use url::Url;
 use super::decoder::Accepts;
 #[cfg(feature = "cookies")]
 use crate::cookie;
+use crate::Client;
 
 /// Extra information about the transport when an HttpConnector is used.
 ///
@@ -74,7 +75,7 @@ impl HttpResponse {
     pub(super) fn new(
         res: http::Response<Vec<u8>>,
         url: Url,
-        accepts: Accepts,
+        accepts: &Client,
         timeout: Option<Duration>,
     ) -> HttpResponse {
         let (mut parts, body) = res.into_parts();

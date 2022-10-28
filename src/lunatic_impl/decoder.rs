@@ -8,7 +8,12 @@ use flate2::read::ZlibDecoder;
 #[cfg(feature = "gzip")]
 use flate2::read::GzDecoder;
 
-use http::HeaderMap;
+use http::{
+    header::{
+        CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, REFERER, TRANSFER_ENCODING,
+    },
+    HeaderMap, HeaderValue, Method, Response, StatusCode,
+};
 
 use httparse::{Status, EMPTY_HEADER};
 // #[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
@@ -18,7 +23,12 @@ use httparse::{Status, EMPTY_HEADER};
 use url::Url;
 
 use super::http_stream::HttpStream;
-use crate::{HttpResponse, Request};
+use crate::{
+    error,
+    into_url::{expect_uri, try_uri},
+    redirect::{self, remove_sensitive_headers},
+    Client, HttpResponse, Request,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Accepts {
@@ -229,113 +239,6 @@ impl Decoder {
     }
 }
 
-// impl Read for Decoder {
-//     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-//         // Do a read or poll for a pending decoder value.
-//         match self.encoding {
-//             MessageEncoding::Octets => self.reader.read(buf),
-//             #[cfg(feature = "gzip")]
-//             Inner::Gzip(ref mut decoder) => {
-//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-//                     None => Poll::Ready(None),
-//                 };
-//             }
-//             #[cfg(feature = "brotli")]
-//             Inner::Brotli(ref mut decoder) => {
-//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-//                     None => Poll::Ready(None),
-//                 };
-//             }
-//             // #[cfg(feature = "deflate")]
-//             MessageEncoding::Deflate => {
-//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-//                     None => Poll::Ready(None),
-//                 };
-//             }
-//         }
-//     }
-// }
-
-// impl HttpBody for Decoder {
-//     type Data = Bytes;
-//     type Error = crate::Error;
-
-//     fn poll_data(
-//         self: Pin<&mut Self>,
-//         cx: &mut Context,
-//     ) -> Poll<Option<Result<Self::Data, Self::Error>>> {
-//         self.poll_next(cx)
-//     }
-
-//     fn poll_trailers(
-//         self: Pin<&mut Self>,
-//         _cx: &mut Context,
-//     ) -> Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-//         Poll::Ready(Ok(None))
-//     }
-
-//     fn size_hint(&self) -> http_body::SizeHint {
-//         match self.inner {
-//             Inner::PlainText(ref body) => HttpBody::size_hint(body),
-//             // the rest are "unknown", so default
-//             #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
-//             _ => http_body::SizeHint::default(),
-//         }
-//     }
-// }
-
-// impl Future for Pending {
-//     type Output = Result<Inner, std::io::Error>;
-
-//     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-//         use futures_util::StreamExt;
-
-//         match futures_core::ready!(Pin::new(&mut self.0).poll_peek(cx)) {
-//             Some(Ok(_)) => {
-//                 // fallthrough
-//             }
-//             Some(Err(_e)) => {
-//                 // error was just a ref, so we need to really poll to move it
-//                 return Poll::Ready(Err(futures_core::ready!(
-//                     Pin::new(&mut self.0).poll_next(cx)
-//                 )
-//                 .expect("just peeked Some")
-//                 .unwrap_err()));
-//             }
-//             None => return Poll::Ready(Ok(Inner::PlainText(Body::empty().into_stream()))),
-//         };
-
-//         let _body = std::mem::replace(
-//             &mut self.0,
-//             IoStream(Body::empty().into_stream()).peekable(),
-//         );
-
-//         match self.1 {
-//             #[cfg(feature = "brotli")]
-//             DecoderType::Brotli => Poll::Ready(Ok(Inner::Brotli(FramedRead::new(
-//                 BrotliDecoder::new(StreamReader::new(_body)),
-//                 BytesCodec::new(),
-//             )))),
-//             #[cfg(feature = "gzip")]
-//             DecoderType::Gzip => Poll::Ready(Ok(Inner::Gzip(FramedRead::new(
-//                 GzipDecoder::new(StreamReader::new(_body)),
-//                 BytesCodec::new(),
-//             )))),
-//             #[cfg(feature = "deflate")]
-//             DecoderType::Deflate => Poll::Ready(Ok(Inner::Deflate(FramedRead::new(
-//                 ZlibDecoder::new(StreamReader::new(_body)),
-//                 BytesCodec::new(),
-//             )))),
-//         }
-//     }
-// }
-
 const MAX_REQUEST_SIZE: usize = 10 * 1024 * 1024;
 const REQUEST_BUFFER_SIZE: usize = 4096;
 const MAX_HEADERS: usize = 128;
@@ -357,7 +260,7 @@ pub(crate) fn parse_response(
     mut stream: HttpStream,
     url: Url,
     req: Request,
-    accepts: Accepts,
+    client: &mut Client,
 ) -> ResponseResult {
     let mut buffer = [0_u8; REQUEST_BUFFER_SIZE];
     let mut headers = [EMPTY_HEADER; MAX_HEADERS];
@@ -432,8 +335,6 @@ pub(crate) fn parse_response(
             response.header(header.name, header.value)
         });
 
-    // TODO: maybe avoid mapping of httparse::Response to http::Response
-    // send a `response` with an empty body for further decoding of the body
     let reader = HttpBodyReader {
         stream,
         response_buffer,
@@ -441,7 +342,7 @@ pub(crate) fn parse_response(
         res: response.body(vec![]).unwrap(),
         req,
     };
-    Ok(Decoder::detect(reader, accepts).decode())
+    Ok(Decoder::detect(reader, client.accepts()).decode())
 }
 
 pub struct HttpBodyReader {
@@ -451,6 +352,7 @@ pub struct HttpBodyReader {
     pub(crate) response_buffer: Vec<u8>,
     pub(crate) offset: usize,
     pub(crate) req: Request,
+    // pub(crate) client: &'a mut Client,
 }
 
 impl HttpBodyReader {
@@ -474,6 +376,18 @@ impl HttpBodyReader {
             || status == http::StatusCode::NOT_MODIFIED
             || (status_num >= 100 && status_num < 200)
     }
+}
+
+fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
+    if next.scheme() == "http" && previous.scheme() == "https" {
+        return None;
+    }
+
+    let mut referer = previous.clone();
+    let _ = referer.set_username("");
+    let _ = referer.set_password(None);
+    referer.set_fragment(None);
+    referer.as_str().parse().ok()
 }
 
 impl Read for HttpBodyReader {

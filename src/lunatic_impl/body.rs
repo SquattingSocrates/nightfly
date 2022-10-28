@@ -17,6 +17,12 @@ impl Into<Body> for Bytes {
     }
 }
 
+impl Into<Body> for () {
+    fn into(self) -> Body {
+        Body::empty()
+    }
+}
+
 impl Into<Bytes> for Body {
     fn into(self) -> Bytes {
         Bytes::from(self.0)

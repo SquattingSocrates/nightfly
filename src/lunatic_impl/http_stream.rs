@@ -6,7 +6,7 @@ use url::Url;
 
 use crate::error::Kind;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum HttpStream {
     Tcp(TcpStream),
     Tls(TlsStream),
