@@ -11,6 +11,42 @@ use lunatic::{
 use nightfly::StatusCode;
 use submillisecond::{response::Response as SubmsResponse, router, Application, Json};
 
+struct ServerSup;
+
+struct ServerProcess(Process<()>);
+
+#[abstract_process]
+impl ServerProcess {
+    #[init]
+    fn init(_: ProcessRef<Self>, _: ()) -> Self {
+        Self(spawn_link!(|| {
+            start_server().unwrap();
+        }))
+    }
+
+    #[terminate]
+    fn terminate(self) {
+        println!("Shutdown process");
+    }
+
+    #[handle_link_trapped]
+    fn handle_link_trapped(&self, _: Tag) {
+        println!("Link trapped");
+    }
+}
+
+impl Supervisor for ServerSup {
+    type Arg = String;
+    type Children = ServerProcess;
+
+    fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
+        // If a child fails, just restart it.
+        config.set_strategy(SupervisorStrategy::OneForOne);
+        // Start One `ServerProcess`
+        config.children_args(((), Some(name)));
+    }
+}
+
 fn index() -> &'static str {
     "Hello"
 }
@@ -79,42 +115,6 @@ fn start_server() -> std::io::Result<()> {
 }
 
 static ADDR: &'static str = "0.0.0.0:3000";
-
-struct ServerSup;
-
-struct ServerProcess(Process<()>);
-
-#[abstract_process]
-impl ServerProcess {
-    #[init]
-    fn init(_: ProcessRef<Self>, _: ()) -> Self {
-        Self(spawn_link!(|| {
-            start_server().unwrap();
-        }))
-    }
-
-    #[terminate]
-    fn terminate(self) {
-        println!("Shutdown process");
-    }
-
-    #[handle_link_trapped]
-    fn handle_link_trapped(&self, _: Tag) {
-        println!("Link trapped");
-    }
-}
-
-impl Supervisor for ServerSup {
-    type Arg = String;
-    type Children = ServerProcess;
-
-    fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
-        // If a child fails, just restart it.
-        config.set_strategy(SupervisorStrategy::OneForOne);
-        // Start One `ServerProcess`
-        config.children_args(((), Some(name)));
-    }
-}
 
 fn ensure_server() {
     if let Some(_) = Process::<Process<()>>::lookup("__server__") {

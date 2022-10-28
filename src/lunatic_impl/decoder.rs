@@ -1,33 +1,30 @@
 use std::convert::TryFrom;
 use std::fmt;
-use std::io::{Cursor, Read};
-
-#[cfg(feature = "gzip")]
-use async_compression::tokio::bufread::GzipDecoder;
-
-#[cfg(feature = "brotli")]
-use async_compression::tokio::bufread::BrotliDecoder;
+use std::io::Read;
 
 #[cfg(feature = "deflate")]
-use async_compression::tokio::bufread::ZlibDecoder;
+use flate2::read::ZlibDecoder;
 
-use bytes::Bytes;
+#[cfg(feature = "gzip")]
+use flate2::read::GzDecoder;
+
+#[cfg(feature = "brotli")]
+use brotli::BrotliDecompress;
+
 use http::HeaderMap;
 
 use httparse::{Status, EMPTY_HEADER};
-use lunatic::net::TcpStream;
-#[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
-use tokio_util::codec::{BytesCodec, FramedRead};
-#[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
-use tokio_util::io::StreamReader;
+// #[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
+// use flate2::
+// #[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
+// use tokio_util::io::StreamReader;
 use url::Url;
 
-use super::super::Body;
 use super::http_stream::HttpStream;
-use crate::{error, HttpResponse};
+use crate::{HttpResponse, Request};
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Accepts {
+pub(crate) struct Accepts {
     #[cfg(feature = "gzip")]
     pub(super) gzip: bool,
     #[cfg(feature = "brotli")]
@@ -40,37 +37,18 @@ pub(super) struct Accepts {
 ///
 /// The inner decoder may be constructed asynchronously.
 pub(crate) struct Decoder {
-    inner: Inner,
+    encoding: MessageEncoding,
+    reader: HttpBodyReader,
 }
 
-enum Inner {
-    /// A `PlainText` decoder just returns the response content as is.
-    PlainText(Vec<u8>),
-
-    /// A `Gzip` decoder will uncompress the gzipped response content before returning it.
-    #[cfg(feature = "gzip")]
-    Gzip(FramedRead<GzipDecoder<StreamReader<Peekable<IoStream>, Bytes>>, BytesCodec>),
-
-    /// A `Brotli` decoder will uncompress the brotlied response content before returning it.
-    #[cfg(feature = "brotli")]
-    Brotli(FramedRead<BrotliDecoder<StreamReader<Peekable<IoStream>, Bytes>>, BytesCodec>),
-
-    /// A `Deflate` decoder will uncompress the deflated response content before returning it.
-    #[cfg(feature = "deflate")]
-    Deflate(FramedRead<ZlibDecoder<StreamReader<Peekable<IoStream>, Bytes>>, BytesCodec>),
-
-    /// A decoder that doesn't have a value yet.
-    #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
-    Pending(Pending),
-}
-
-enum DecoderType {
+enum MessageEncoding {
     #[cfg(feature = "gzip")]
     Gzip,
     #[cfg(feature = "brotli")]
     Brotli,
-    #[cfg(feature = "deflate")]
+    // #[cfg(feature = "deflate")]
     Deflate,
+    Octets,
 }
 
 impl fmt::Debug for Decoder {
@@ -80,19 +58,13 @@ impl fmt::Debug for Decoder {
 }
 
 impl Decoder {
-    #[cfg(feature = "blocking")]
-    pub(crate) fn empty() -> Decoder {
-        Decoder {
-            inner: Inner::PlainText(Body::empty().into_stream()),
-        }
-    }
-
     /// A plain text decoder.
     ///
     /// This decoder will emit the underlying chunks as-is.
-    fn plain_text(body: Vec<u8>) -> Decoder {
+    fn plain_text(reader: HttpBodyReader) -> Decoder {
         Decoder {
-            inner: Inner::PlainText(body),
+            reader,
+            encoding: MessageEncoding::Octets,
         }
     }
 
@@ -100,14 +72,10 @@ impl Decoder {
     ///
     /// This decoder will buffer and decompress chunks that are gzipped.
     #[cfg(feature = "gzip")]
-    fn gzip(body: Body) -> Decoder {
-        use futures_util::StreamExt;
-
+    fn gzip(reader: HttpBodyReader) -> Decoder {
         Decoder {
-            inner: Inner::Pending(Pending(
-                IoStream(body.into_stream()).peekable(),
-                DecoderType::Gzip,
-            )),
+            reader,
+            encoding: MessageEncoding::Gzip,
         }
     }
 
@@ -115,39 +83,93 @@ impl Decoder {
     ///
     /// This decoder will buffer and decompress chunks that are brotlied.
     #[cfg(feature = "brotli")]
-    fn brotli(body: Body) -> Decoder {
-        use futures_util::StreamExt;
-
+    fn brotli(reader: HttpBodyReader) -> Decoder {
         Decoder {
-            inner: Inner::Pending(Pending(
-                IoStream(body.into_stream()).peekable(),
-                DecoderType::Brotli,
-            )),
+            reader,
+            encoding: MessageEncoding::Brotli,
         }
     }
 
     /// A deflate decoder.
     ///
     /// This decoder will buffer and decompress chunks that are deflated.
-    #[cfg(feature = "deflate")]
-    fn deflate(body: Body) -> Decoder {
-        use futures_util::StreamExt;
-
+    // #[cfg(feature = "deflate")]
+    fn deflate(reader: HttpBodyReader) -> Decoder {
         Decoder {
-            inner: Inner::Pending(Pending(
-                IoStream(body.into_stream()).peekable(),
-                DecoderType::Deflate,
-            )),
+            reader,
+            encoding: MessageEncoding::Deflate,
         }
     }
 
-    pub fn decode(&self) -> Vec<u8> {
-        match &self.inner {
-            Inner::PlainText(text) => text.clone(),
+    pub fn decode(&mut self) -> HttpResponse {
+        if let MessageEncoding::Octets = self.encoding {
+            let reader = &mut self.reader;
+            let body = if let Some(content_length) = reader.content_length() {
+                #[allow(clippy::comparison_chain)]
+                if reader.response_buffer[reader.offset..].len() == content_length {
+                    // Complete content is captured from the response w/o trailing pipelined
+                    // responses.
+                    reader.response_buffer[reader.offset..].to_owned()
+                } else {
+                    // Read the rest from TCP stream to form a full response
+                    let rest = content_length - reader.response_buffer[reader.offset..].len();
+                    let mut buffer = vec![0u8; rest];
+                    reader.stream.read_exact(&mut buffer).unwrap();
+                    reader.response_buffer.extend(&buffer);
+                    reader.response_buffer[reader.offset..].to_owned()
+                }
+            } else if reader.no_content_length_required() {
+                vec![]
+            } else {
+                // this should not happen
+                panic!("Content-encoded body without content-length");
+            };
+            return HttpResponse {
+                headers: reader.res.headers().to_owned(),
+                status: reader.res.status().to_owned(),
+                version: reader.res.version().to_owned(),
+                body,
+                url: reader.req.url.clone(),
+            };
+        }
+        let buf = if !self.reader.no_content_length_required() {
+            match &self.encoding {
+                #[cfg(feature = "brotli")]
+                MessageEncoding::Brotli => {
+                    let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
+                    let mut buf = Vec::new();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                #[cfg(feature = "gzip")]
+                MessageEncoding::Gzip => {
+                    let mut decoder = GzDecoder::new(&mut self.reader);
+                    let mut buf = Vec::new();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                // #[cfg(feature = "deflate")]
+                MessageEncoding::Deflate => {
+                    let mut decoder = ZlibDecoder::new(&mut self.reader);
+                    let mut buf = Vec::new();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                _ => panic!("Cannot happen"),
+            }
+        } else {
+            vec![]
+        };
+        HttpResponse {
+            headers: self.reader.res.headers().to_owned(),
+            status: self.reader.res.status().to_owned(),
+            version: self.reader.res.version().to_owned(),
+            body: buf,
+            url: self.reader.req.url.clone(),
         }
     }
 
-    #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
+    // #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
     fn detect_encoding(headers: &mut HeaderMap, encoding_str: &str) -> bool {
         use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
         use lunatic_log::warn;
@@ -177,81 +199,71 @@ impl Decoder {
         is_content_encoded
     }
 
-    /// Constructs a Decoder from a hyper request.
+    /// Constructs a Decoder from a partial http response.
     ///
     /// A decoder is just a wrapper around the hyper request that knows
     /// how to decode the content body of the request.
     ///
     /// Uses the correct variant by inspecting the Content-Encoding header.
-    pub(super) fn detect(_headers: &mut HeaderMap, body: Vec<u8>, _accepts: Accepts) -> Decoder {
+    pub(super) fn detect(mut reader: HttpBodyReader, _accepts: Accepts) -> Decoder {
+        let _headers = reader.res.headers_mut();
         #[cfg(feature = "gzip")]
         {
             if _accepts.gzip && Decoder::detect_encoding(_headers, "gzip") {
-                return Decoder::gzip(body);
+                return Decoder::gzip(reader);
             }
         }
 
         #[cfg(feature = "brotli")]
         {
             if _accepts.brotli && Decoder::detect_encoding(_headers, "br") {
-                return Decoder::brotli(body);
+                return Decoder::brotli(reader);
             }
         }
 
-        #[cfg(feature = "deflate")]
+        // #[cfg(feature = "deflate")]
         {
             if _accepts.deflate && Decoder::detect_encoding(_headers, "deflate") {
-                return Decoder::deflate(body);
+                return Decoder::deflate(reader);
             }
         }
 
-        Decoder::plain_text(body)
+        Decoder::plain_text(reader)
     }
 }
 
-impl Read for Decoder {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        // Do a read or poll for a pending decoder value.
-        match self.inner {
-            #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
-            Inner::Pending(ref mut future) => match Pin::new(future).poll(cx) {
-                Poll::Ready(Ok(inner)) => {
-                    self.inner = inner;
-                    return self.poll_next(cx);
-                }
-                Poll::Ready(Err(e)) => {
-                    return Poll::Ready(Some(Err(crate::error::decode_io(e))));
-                }
-                Poll::Pending => return Poll::Pending,
-            },
-            Inner::PlainText(ref mut body) => Cursor::new(body).read(buf),
-            #[cfg(feature = "gzip")]
-            Inner::Gzip(ref mut decoder) => {
-                return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-                    Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-                    Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-                    None => Poll::Ready(None),
-                };
-            }
-            #[cfg(feature = "brotli")]
-            Inner::Brotli(ref mut decoder) => {
-                return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-                    Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-                    Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-                    None => Poll::Ready(None),
-                };
-            }
-            #[cfg(feature = "deflate")]
-            Inner::Deflate(ref mut decoder) => {
-                return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
-                    Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
-                    Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
-                    None => Poll::Ready(None),
-                };
-            }
-        }
-    }
-}
+// impl Read for Decoder {
+//     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+//         // Do a read or poll for a pending decoder value.
+//         match self.encoding {
+//             MessageEncoding::Octets => self.reader.read(buf),
+//             #[cfg(feature = "gzip")]
+//             Inner::Gzip(ref mut decoder) => {
+//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
+//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
+//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
+//                     None => Poll::Ready(None),
+//                 };
+//             }
+//             #[cfg(feature = "brotli")]
+//             Inner::Brotli(ref mut decoder) => {
+//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
+//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
+//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
+//                     None => Poll::Ready(None),
+//                 };
+//             }
+//             // #[cfg(feature = "deflate")]
+//             MessageEncoding::Deflate => {
+//                 return match futures_core::ready!(Pin::new(decoder).poll_next(cx)) {
+//                     Some(Ok(bytes)) => Poll::Ready(Some(Ok(bytes.freeze()))),
+//                     Some(Err(err)) => Poll::Ready(Some(Err(crate::error::decode_io(err)))),
+//                     None => Poll::Ready(None),
+//                 };
+//             }
+//         }
+//     }
+// }
 
 // impl HttpBody for Decoder {
 //     type Data = Bytes;
@@ -347,6 +359,8 @@ pub(crate) fn parse_response(
     mut response_buffer: Vec<u8>,
     mut stream: HttpStream,
     url: Url,
+    req: Request,
+    accepts: Accepts,
 ) -> ResponseResult {
     let mut buffer = [0_u8; REQUEST_BUFFER_SIZE];
     let mut headers = [EMPTY_HEADER; MAX_HEADERS];
@@ -414,53 +428,78 @@ pub(crate) fn parse_response(
                 let value_string = std::str::from_utf8(header.value).unwrap();
                 let length = value_string.parse::<usize>().unwrap();
                 content_lengt = Some(length);
+            } else if header.name.to_lowercase() == "transfer-length" {
+                let value_string = std::str::from_utf8(header.value).unwrap();
+                let length = value_string.parse::<usize>().unwrap();
             }
             response.header(header.name, header.value)
         });
-    // If content-length exists, response has a body
-    let res = response.body(vec![0u8; 0]).unwrap();
-    let mut res = HttpResponse {
-        headers: res.headers().to_owned(),
-        status: res.status().to_owned(),
-        version: res.version().to_owned(),
-        body: vec![],
-        url,
-    };
-    if let Some(content_lengt) = content_lengt {
-        #[allow(clippy::comparison_chain)]
-        if response_buffer[offset..].len() == content_lengt {
-            // Complete content is captured from the response w/o trailing pipelined
-            // responses.
-            res.body = response_buffer[offset..].to_owned();
-            return Ok(res);
 
-        // } else if response_buffer[offset..].len() > content_lengt {
-        //     // Complete content is captured from the response with trailing pipelined
-        //     // responses.
-        //         response
-        //             .body(Body::from_slice(&response_buffer[offset..]))
-        //             .unwrap(),
-        //         Vec::from(&response_buffer[offset + content_lengt..])
-        } else {
-            // Read the rest from TCP stream to form a full response
-            let rest = content_lengt - response_buffer[offset..].len();
-            let mut buffer = vec![0u8; rest];
-            stream.read_exact(&mut buffer).unwrap();
-            response_buffer.extend(&buffer);
-            res.body = response_buffer[offset..].to_owned();
-            return Ok(res);
+    // TODO: maybe avoid mapping of httparse::Response to http::Response
+    // send a `response` with an empty body for further decoding of the body
+    let reader = HttpBodyReader {
+        stream,
+        response_buffer,
+        offset,
+        res: response.body(vec![]).unwrap(),
+        req,
+    };
+    Ok(Decoder::detect(reader, accepts).decode())
+}
+
+pub struct HttpBodyReader {
+    pub(crate) stream: HttpStream,
+    // used to check headers, but has no body yet
+    pub(crate) res: http::Response<Vec<u8>>,
+    pub(crate) response_buffer: Vec<u8>,
+    pub(crate) offset: usize,
+    pub(crate) req: Request,
+}
+
+impl HttpBodyReader {
+    pub fn content_length(&self) -> Option<usize> {
+        self.res
+            .headers()
+            .get(http::header::CONTENT_LENGTH)
+            .map(|header| {
+                let value_string = std::str::from_utf8(header.as_bytes()).unwrap();
+                value_string.parse::<usize>().unwrap()
+            })
+    }
+
+    pub fn no_content_length_required(&self) -> bool {
+        let method = &self.req.method;
+        let status = self.res.status();
+        let status_num = status.as_u16();
+        method == http::Method::HEAD
+            || method == http::Method::GET
+            || status == http::StatusCode::NO_CONTENT
+            || status == http::StatusCode::NOT_MODIFIED
+            || (status_num >= 100 && status_num < 200)
+    }
+}
+
+impl Read for HttpBodyReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        lunatic_log::info!(
+            "READ FROM HTTP BODY READER {:?} > {:?}",
+            self.offset,
+            self.response_buffer.len()
+        );
+        if self.offset > self.response_buffer.len() {
+            // start reading from tcp stream
+            return self.stream.read(buf);
         }
-    } else {
-        // If the offset points to the end of `responses_buffer` we have a full response,
-        // w/o a trailing pipelined response.
-        if response_buffer[offset..].is_empty() {
-            return Ok(res);
-        } else {
-            // PipelinedResponses::from_pipeline(
-            return Ok(res);
-            //     Vec::from(&response_buffer[offset..]),
-            // )
+        let mut len_read = 0;
+        for (idx, byte) in self.response_buffer[self.offset..].iter().enumerate() {
+            if idx > buf.len() {
+                break;
+            }
+            len_read += 1;
+            buf[idx] = *byte;
         }
+        self.offset = len_read;
+        Ok(len_read)
     }
 }
 

@@ -1,8 +1,8 @@
 [package]
-authors = ["Sean McArthur <sean@seanmonstar.com>"] 
+authors = ["Yuriy Voshchepynets <yuriy.voshchepynets@ckreator.com>"] 
 autotests = true 
 categories = ["web-programming::http-client", "wasm"] 
-description = "higher level HTTP client library" 
+description = "higher level HTTP client library for the lunatic runtime" 
 documentation = "https://docs.rs/nightfly" 
 edition = "2018" 
 keywords = ["http", "request", "client"] 
@@ -10,26 +10,29 @@ license = "MIT/Apache-2.0"
 name = "nightfly" 
 readme = "README.md" 
 repository = "https://github.com/seanmonstar/nightfly" 
-version = "0.11.12" # remember to update html_root_url
+version = "0.1.0" # remember to update html_root_url
 
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-# targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
 
 [package.metadata.playground]
 features = [
   "cookies",
   "json",
   "multipart",
+  "brotli",
+  "gzip",
+  "deflate",
 ]
 
 [features]
 cookies = ["cookie_crate", "cookie_store", "proc-macro-hack"]
+default = ["gzip", "brotli", "deflate"]
 
-# gzip = ["gzip"]
+gzip = ["flate2"]
 
-# brotli = ["brotli"]
+brotli = ["dep:brotli"]
 
 deflate = ["flate2"]
 
@@ -64,6 +67,7 @@ serde_json = "1.0"
 ## multipart
 mime_guess = {version = "2.0", default-features = false, optional = true}
 # Optional deps...
+brotli = {version = "3.3.4", optional = true}
 
 ## cookies
 cookie_crate = {version = "0.16", package = "cookie", optional = true}
@@ -71,9 +75,7 @@ cookie_store = {version = "0.16", optional = true}
 proc-macro-hack = {version = "0.5.19", optional = true}
 
 ## compression
-# brotli = {version = "^3.3.0", optional = true}
 flate2 = {version = "^1.0.24", optional = true}
-# gzip = {version = "^3.3.0", optional = true}
 
 ## trust-dns
 trust-dns-resolver = {version = "0.22", optional = true}
@@ -143,3 +145,6 @@ required-features = ["deflate"]
 name = "multipart"
 path = "tests/multipart.rs"
 required-features = ["multipart"]
+
+[rust-analyzer.cargo]
+features = ["deflate"]

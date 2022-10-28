@@ -1482,7 +1482,7 @@ impl Client {
     }
 
     pub(super) fn execute_request(&mut self, req: Request) -> Result<HttpResponse, crate::Error> {
-        let (method, url, mut headers, body, timeout, version) = req.pieces();
+        let (method, url, mut headers, body, timeout, version) = req.clone().pieces();
         if url.scheme() != "http" && url.scheme() != "https" {
             return Err(error::url_bad_scheme(url));
         }
@@ -1540,7 +1540,13 @@ impl Client {
 
         let response_buffer = Vec::new();
 
-        match parse_response(response_buffer, stream.clone(), url) {
+        match parse_response(
+            response_buffer,
+            stream.clone(),
+            url,
+            req,
+            self.inner.accepts.clone(),
+        ) {
             Ok(res) => Ok(res),
             Err(e) => unimplemented!(),
         }

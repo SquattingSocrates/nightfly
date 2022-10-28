@@ -80,8 +80,8 @@ impl HttpResponse {
         timeout: Option<Duration>,
     ) -> HttpResponse {
         let (mut parts, body) = res.into_parts();
-        let decoder = Decoder::detect(&mut parts.headers, body, accepts);
-        let body = decoder.decode();
+        // let decoder = Decoder::detect(&mut parts.headers, body, accepts);
+        // let body = decoder.decode();
 
         HttpResponse {
             body,
