@@ -1,6 +1,4 @@
-#![cfg(not(target_arch = "wasm32"))]
 mod support;
-use futures_util::stream::StreamExt;
 use support::*;
 
 #[lunatic::test]

@@ -50,7 +50,7 @@ use crate::{IntoUrl, Method, Proxy, Url};
 pub struct Client {
     accepts: Accepts,
     #[cfg(feature = "cookies")]
-    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
+    pub(crate) cookie_store: Option<Arc<dyn cookie::CookieStore>>,
     pub(crate) headers: HeaderMap,
     pub(crate) redirect_policy: redirect::Policy,
     pub(crate) referer: bool,
@@ -497,17 +497,17 @@ impl ClientBuilder {
         // builder.pool_max_idle_per_host(config.pool_max_idle_per_host);
         // connector.set_keepalive(config.tcp_keepalive);
 
-        // if config.http09_responses {
-        //     builder.http09_responses(true);
-        // }
+        if config.http09_responses {
+            builder = builder.http09_responses();
+        }
 
-        // if config.http1_title_case_headers {
-        //     builder.http1_title_case_headers(true);
-        // }
+        if config.http1_title_case_headers {
+            builder = builder.http1_title_case_headers();
+        }
 
-        // if config.http1_allow_obsolete_multiline_headers_in_responses {
-        //     builder.http1_allow_obsolete_multiline_headers_in_responses(true);
-        // }
+        if config.http1_allow_obsolete_multiline_headers_in_responses {
+            builder = builder.http1_allow_obsolete_multiline_headers_in_responses(true);
+        }
 
         // let hyper_client = builder.build(connector);
 
@@ -1547,6 +1547,7 @@ impl Client {
         // insert default headers in the request headers
         // without overwriting already appended headers.
         for (key, value) in &self.headers {
+            println!("WRITING HEADER from client {:?}", headers.entry(key));
             if let Entry::Vacant(entry) = headers.entry(key) {
                 entry.insert(value.clone());
             }
@@ -1555,7 +1556,7 @@ impl Client {
         // Add cookies from the cookie store.
         #[cfg(feature = "cookies")]
         {
-            if let Some(cookie_store) = self.inner.cookie_store.as_ref() {
+            if let Some(cookie_store) = self.cookie_store.as_ref() {
                 if headers.get(crate::header::COOKIE).is_none() {
                     add_cookie_header(&mut headers, &**cookie_store, &url);
                 }
@@ -1798,7 +1799,11 @@ impl Config {
 // }
 
 #[cfg(feature = "cookies")]
-fn add_cookie_header(headers: &mut HeaderMap, cookie_store: &dyn cookie::CookieStore, url: &Url) {
+pub(crate) fn add_cookie_header(
+    headers: &mut HeaderMap,
+    cookie_store: &dyn cookie::CookieStore,
+    url: &Url,
+) {
     if let Some(header) = cookie_store.cookies(url) {
         headers.insert(crate::header::COOKIE, header);
     }

@@ -18,8 +18,9 @@ use super::response::HttpResponse;
 use crate::header::CONTENT_LENGTH;
 use crate::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use crate::into_url::{expect_uri, try_uri};
+use crate::lunatic_impl::client::add_cookie_header;
 use crate::redirect::remove_sensitive_headers;
-use crate::{error, redirect, Body, Method, Url};
+use crate::{cookie, error, redirect, Body, Method, Url};
 use http::{request::Parts, Request as HttpRequest, Version};
 
 /// A request which can be executed with `Client::execute()`.
@@ -693,9 +694,9 @@ impl<'a> PendingRequest<'a> {
         {
             if let Some(ref cookie_store) = self.client.cookie_store {
                 let mut cookies =
-                    cookie::extract_response_cookie_headers(&res.headers()).peekable();
+                    cookie::extract_response_cookie_headers(&self.res.headers()).peekable();
                 if cookies.peek().is_some() {
-                    cookie_store.set_cookies(&mut cookies, &self.url);
+                    cookie_store.set_cookies(&mut cookies, &self.req.url);
                 }
             }
         }
@@ -709,6 +710,13 @@ impl<'a> PendingRequest<'a> {
                     CONTENT_LENGTH,
                 ] {
                     self.res.headers.remove(header);
+                }
+
+                match self.req.method {
+                    Method::GET | Method::HEAD => {}
+                    _ => {
+                        self.req.method = Method::GET;
+                    }
                 }
                 true
             }
@@ -780,7 +788,7 @@ impl<'a> PendingRequest<'a> {
                         #[cfg(feature = "cookies")]
                         {
                             if let Some(ref cookie_store) = self.client.cookie_store {
-                                add_cookie_header(&mut headers, &**cookie_store, &self.url);
+                                add_cookie_header(&mut headers, &**cookie_store, &self.req.url);
                             }
                         }
 

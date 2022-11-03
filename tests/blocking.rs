@@ -1,51 +1,8 @@
 mod support;
 
 use http::{HeaderMap, HeaderValue};
-use lunatic::{
-    abstract_process,
-    process::{ProcessRef, StartProcess},
-    spawn_link,
-    supervisor::{Supervisor, SupervisorStrategy},
-    Process, Tag,
-};
 use nightfly::StatusCode;
-use submillisecond::{response::Response as SubmsResponse, router, Application, Json};
-
-struct ServerSup;
-
-struct ServerProcess(Process<()>);
-
-#[abstract_process]
-impl ServerProcess {
-    #[init]
-    fn init(_: ProcessRef<Self>, _: ()) -> Self {
-        Self(spawn_link!(|| {
-            start_server().unwrap();
-        }))
-    }
-
-    #[terminate]
-    fn terminate(self) {
-        println!("Shutdown process");
-    }
-
-    #[handle_link_trapped]
-    fn handle_link_trapped(&self, _: Tag) {
-        println!("Link trapped");
-    }
-}
-
-impl Supervisor for ServerSup {
-    type Arg = String;
-    type Children = ServerProcess;
-
-    fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
-        // If a child fails, just restart it.
-        config.set_strategy(SupervisorStrategy::OneForOne);
-        // Start One `ServerProcess`
-        config.children_args(((), Some(name)));
-    }
-}
+use submillisecond::{response::Response as SubmsResponse, router, Json, RequestContext};
 
 fn index() -> &'static str {
     "Hello"
@@ -99,33 +56,25 @@ fn appended_headers(headers: HeaderMap) -> SubmsResponse {
     SubmsResponse::default()
 }
 
-fn start_server() -> std::io::Result<()> {
-    Application::new(router! {
-        GET "/text" => index
-        GET "/non_utf8_text" => non_utf8_text
-        GET "/1" => empty_response
-        POST "/2" => ensure_hello
-        GET "/err_400" => res_400
-        GET "/json" => get_json
-        GET "/default_headers" => default_headers
-        GET "/overwrite_headers" => overwrite_headers
-        GET "/4" => appended_headers
-    })
-    .serve(ADDR)
-}
-
 static ADDR: &'static str = "0.0.0.0:3000";
 
-fn ensure_server() {
-    if let Some(_) = Process::<Process<()>>::lookup("__server__") {
-        return;
-    }
-    ServerSup::start("__server__".to_owned(), None);
-}
+static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+    GET "/text" => index
+    GET "/non_utf8_text" => non_utf8_text
+    GET "/1" => empty_response
+    POST "/2" => ensure_hello
+    GET "/err_400" => res_400
+    GET "/json" => get_json
+    GET "/default_headers" => default_headers
+    GET "/overwrite_headers" => overwrite_headers
+    GET "/4" => appended_headers
+};
+
+wrap_server!(server, ROUTER, ADDR);
 
 #[lunatic::test]
 fn test_response_text() {
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/text", ADDR);
     let res = nightfly::get(&url).unwrap();
@@ -149,7 +98,7 @@ fn test_response_text() {
 #[lunatic::test]
 fn test_response_non_utf_8_text() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/non_utf8_text", ADDR);
     let res = nightfly::get(&url).unwrap();
@@ -166,7 +115,7 @@ fn test_response_non_utf_8_text() {
 // #[cfg(feature = "json")]
 fn test_response_json() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/json", ADDR);
     let res = nightfly::get(&url).unwrap();
@@ -181,7 +130,7 @@ fn test_response_json() {
 #[lunatic::test]
 fn test_get() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/1", ADDR);
     let res = nightfly::get(&url).unwrap();
@@ -196,7 +145,7 @@ fn test_get() {
 #[lunatic::test]
 fn test_post() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/2", ADDR);
     let res = nightfly::Client::new()
@@ -243,7 +192,7 @@ fn test_post() {
 #[lunatic::test]
 fn test_error_for_status_4xx() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/err_400", ADDR);
     let res = nightfly::get(&url).unwrap();
@@ -258,7 +207,7 @@ fn test_error_for_status_4xx() {
 #[lunatic::test]
 fn test_error_for_status_5xx() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let url = format!("http://{}/2", ADDR);
     let res = nightfly::Client::new()
@@ -278,7 +227,7 @@ fn test_error_for_status_5xx() {
 #[lunatic::test]
 fn test_default_headers() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let mut headers = http::HeaderMap::with_capacity(1);
     headers.insert("nightfly-test", "orly".parse().unwrap());
@@ -297,7 +246,7 @@ fn test_default_headers() {
 #[lunatic::test]
 fn test_override_default_headers() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let mut headers = http::HeaderMap::with_capacity(1);
     headers.insert(
@@ -326,7 +275,7 @@ fn test_override_default_headers() {
 #[lunatic::test]
 fn test_appended_headers_not_overwritten() {
     // maybe wait for server to spawn
-    let _ = ensure_server();
+    let _ = server::ensure_server();
 
     let client = nightfly::Client::new();
 

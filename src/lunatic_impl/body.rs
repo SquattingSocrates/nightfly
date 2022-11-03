@@ -11,7 +11,25 @@ impl Into<Body> for String {
     }
 }
 
+impl Into<Body> for &str {
+    fn into(self) -> Body {
+        Body(self.into())
+    }
+}
+
 impl Into<Body> for Bytes {
+    fn into(self) -> Body {
+        Body(self.into())
+    }
+}
+
+impl Into<Body> for Vec<u8> {
+    fn into(self) -> Body {
+        Body(self)
+    }
+}
+
+impl Into<Body> for &[u8] {
     fn into(self) -> Body {
         Body(self.into())
     }
@@ -20,6 +38,12 @@ impl Into<Body> for Bytes {
 impl Into<Body> for () {
     fn into(self) -> Body {
         Body::empty()
+    }
+}
+
+impl Into<Body> for HttpResponse {
+    fn into(self) -> Body {
+        self.body.into()
     }
 }
 
@@ -71,6 +95,8 @@ impl Read for Body {
 use std::io::{Cursor, Read};
 
 use thiserror::Error;
+
+use crate::HttpResponse;
 
 #[derive(Error, Debug)]
 pub enum EncodeError {

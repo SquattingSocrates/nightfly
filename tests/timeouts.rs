@@ -1,238 +1,277 @@
-#![cfg(not(target_arch = "wasm32"))]
-mod support;
-use support::*;
+// mod support;
 
-use std::time::Duration;
+// use std::time::Duration;
 
-#[lunatic::test]
-fn client_timeout() {
-    let _ = env_logger::try_init();
+// use lunatic::{
+//     abstract_process,
+//     process::{ProcessRef, StartProcess},
+//     spawn_link,
+//     supervisor::{Supervisor, SupervisorStrategy},
+//     Process, Tag,
+// };
+// use submillisecond::{response::Response as SubmsResponse, router, Application, RequestContext};
 
-    let server = server::http(move |_req| {
-        async {
-            // delay returning the response
-            lunatic::time::sleep(Duration::from_secs(2));
-            http::Response::default()
-        }
-    });
+// struct ServerSup;
 
-    let client = nightfly::Client::builder()
-        .timeout(Duration::from_millis(500))
-        .build()
-        .unwrap();
+// struct ServerProcess(Process<()>);
 
-    let url = format!("http://{}/slow", server.addr());
+// #[abstract_process]
+// impl ServerProcess {
+//     #[init]
+//     fn init(_: ProcessRef<Self>, _: ()) -> Self {
+//         Self(spawn_link!(|| {
+//             start_server().unwrap();
+//         }))
+//     }
 
-    let res = client.get(&url).send();
+//     #[terminate]
+//     fn terminate(self) {
+//         println!("Shutdown process");
+//     }
 
-    let err = res.unwrap_err();
+//     #[handle_link_trapped]
+//     fn handle_link_trapped(&self, _: Tag) {
+//         println!("Link trapped");
+//     }
+// }
 
-    assert!(err.is_timeout());
-    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-}
+// impl Supervisor for ServerSup {
+//     type Arg = String;
+//     type Children = ServerProcess;
 
-#[lunatic::test]
-fn request_timeout() {
-    let _ = env_logger::try_init();
+//     fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
+//         // If a child fails, just restart it.
+//         config.set_strategy(SupervisorStrategy::OneForOne);
+//         // Start One `ServerProcess`
+//         config.children_args(((), Some(name)));
+//     }
+// }
 
-    let server = server::http(move |_req| {
-        async {
-            // delay returning the response
-            lunatic::time::sleep(Duration::from_secs(2));
-            http::Response::default()
-        }
-    });
+// fn slow() -> SubmsResponse {
+//     // delay returning the response
+//     lunatic::sleep(Duration::from_secs(2));
+//     SubmsResponse::default()
+// }
 
-    let client = nightfly::Client::builder().build().unwrap();
+// fn start_server() -> std::io::Result<()> {
+//     Application::new(router! {
+//         GET "/slow" => slow
+//     })
+//     .serve(ADDR)
+// }
 
-    let url = format!("http://{}/slow", server.addr());
+// static ADDR: &'static str = "0.0.0.0:3000";
 
-    let res = client.get(&url).timeout(Duration::from_millis(500)).send();
+// fn ensure_server() {
+//     if let Some(_) = Process::<Process<()>>::lookup("__server__") {
+//         return;
+//     }
+//     ServerSup::start("__server__".to_owned(), None);
+// }
 
-    let err = res.unwrap_err();
+// #[lunatic::test]
+// fn client_timeout() {
+//     let _ = ensure_server();
 
-    if cfg!(not(target_arch = "wasm32")) {
-        assert!(err.is_timeout() && !err.is_connect());
-    } else {
-        assert!(err.is_timeout());
-    }
-    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-}
+//     let client = nightfly::Client::builder()
+//         .timeout(Duration::from_millis(500))
+//         .build()
+//         .unwrap();
 
-#[cfg(not(target_arch = "wasm32"))]
-#[lunatic::test]
-fn connect_timeout() {
-    let _ = env_logger::try_init();
+//     let url = format!("http://{}/slow", ADDR);
 
-    let client = nightfly::Client::builder()
-        .connect_timeout(Duration::from_millis(100))
-        .build()
-        .unwrap();
+//     let res = client.get(&url).send();
 
-    let url = "http://10.255.255.1:81/slow";
+//     let err = res.unwrap_err();
 
-    let res = client.get(url).timeout(Duration::from_millis(1000)).send();
+//     assert!(err.is_timeout());
+//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+// }
 
-    let err = res.unwrap_err();
+// #[lunatic::test]
+// fn request_timeout() {
+//     let _ = ensure_server();
 
-    assert!(err.is_connect() && err.is_timeout());
-}
+//     let client = nightfly::Client::builder().build().unwrap();
 
-#[lunatic::test]
-fn response_timeout() {
-    let _ = env_logger::try_init();
+//     let url = format!("http://{}/slow", ADDR);
 
-    let server = server::http(move |_req| {
-        async {
-            // immediate response, but delayed body
-            let body = hyper::Body::wrap_stream(futures_util::stream::once(async {
-                lunatic::time::sleep(Duration::from_secs(2));
-                Ok::<_, std::convert::Infallible>("Hello")
-            }));
+//     let res = client.get(&url).timeout(Duration::from_millis(500)).send();
 
-            http::Response::new(body)
-        }
-    });
+//     let err = res.unwrap_err();
 
-    let client = nightfly::Client::builder()
-        .timeout(Duration::from_millis(500))
-        .no_proxy()
-        .build()
-        .unwrap();
+//     assert!(err.is_timeout());
+//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+// }
 
-    let url = format!("http://{}/slow", server.addr());
-    let res = client.get(&url).send().expect("Failed to get");
-    let body = res.text();
+// #[lunatic::test]
+// fn connect_timeout() {
+//     let client = nightfly::Client::builder()
+//         .connect_timeout(Duration::from_millis(100))
+//         .build()
+//         .unwrap();
 
-    let err = body.unwrap_err();
+//     let url = "http://10.255.255.1:81/slow";
 
-    assert!(err.is_timeout());
-}
+//     let res = client.get(url).timeout(Duration::from_millis(1000)).send();
 
-/// Tests that internal client future cancels when the oneshot channel
-/// is canceled.
-#[cfg(feature = "blocking")]
-#[test]
-fn timeout_closes_connection() {
-    let _ = env_logger::try_init();
+//     let err = res.unwrap_err();
 
-    // Make Client drop *after* the Server, so the background doesn't
-    // close too early.
-    let client = nightfly::blocking::Client::builder()
-        .timeout(Duration::from_millis(500))
-        .build()
-        .unwrap();
+//     assert!(err.is_timeout());
+// }
 
-    let server = server::http(move |_req| {
-        async {
-            // delay returning the response
-            lunatic::time::sleep(Duration::from_secs(2));
-            http::Response::default()
-        }
-    });
+// // #[lunatic::test]
+// // fn response_timeout() {
+// //     let _ = ensure_server();
 
-    let url = format!("http://{}/closes", server.addr());
-    let err = client.get(&url).send().unwrap_err();
+// //     let server = server::http(move |_req| {
+// //         async {
+// //             // immediate response, but delayed body
+// //             lunatic::sleep(Duration::from_secs(2));
+// //             let body = Ok::<_, std::convert::Infallible>("Hello");
 
-    assert!(err.is_timeout());
-    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-}
+// //             http::Response::new(body)
+// //         }
+// //     });
 
-#[cfg(feature = "blocking")]
-#[test]
-fn timeout_blocking_request() {
-    let _ = env_logger::try_init();
+// //     let client = nightfly::Client::builder()
+// //         .timeout(Duration::from_millis(500))
+// //         .no_proxy()
+// //         .build()
+// //         .unwrap();
 
-    // Make Client drop *after* the Server, so the background doesn't
-    // close too early.
-    let client = nightfly::blocking::Client::builder().build().unwrap();
+// //     let url = format!("http://{}/slow", ADDR);
+// //     let res = client.get(&url).send().expect("Failed to get");
+// //     let body = res.text();
 
-    let server = server::http(move |_req| {
-        async {
-            // delay returning the response
-            lunatic::time::sleep(Duration::from_secs(2));
-            http::Response::default()
-        }
-    });
+// //     let err = body.unwrap_err();
 
-    let url = format!("http://{}/closes", server.addr());
-    let err = client
-        .get(&url)
-        .timeout(Duration::from_millis(500))
-        .send()
-        .unwrap_err();
+// //     assert!(err.is_timeout());
+// // }
 
-    assert!(err.is_timeout());
-    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-}
+// // /// Tests that internal client future cancels when the oneshot channel
+// // /// is canceled.
+// // #[test]
+// // fn timeout_closes_connection() {
+// //     let _ = env_logger::try_init();
 
-#[cfg(feature = "blocking")]
-#[test]
-fn blocking_request_timeout_body() {
-    let _ = env_logger::try_init();
+// //     // Make Client drop *after* the Server, so the background doesn't
+// //     // close too early.
+// //     let client = nightfly::blocking::Client::builder()
+// //         .timeout(Duration::from_millis(500))
+// //         .build()
+// //         .unwrap();
 
-    let client = nightfly::blocking::Client::builder()
-        // this should be overridden
-        .connect_timeout(Duration::from_millis(200))
-        // this should be overridden
-        .timeout(Duration::from_millis(200))
-        .build()
-        .unwrap();
+// //     let server = server::http(move |_req| {
+// //         async {
+// //             // delay returning the response
+// //             lunatic::time::sleep(Duration::from_secs(2));
+// //             http::Response::default()
+// //         }
+// //     });
 
-    let server = server::http(move |_req| {
-        async {
-            // immediate response, but delayed body
-            let body = hyper::Body::wrap_stream(futures_util::stream::once(async {
-                lunatic::time::sleep(Duration::from_secs(1));
-                Ok::<_, std::convert::Infallible>("Hello")
-            }));
+// //     let url = format!("http://{}/closes", ADDR);
+// //     let err = client.get(&url).send().unwrap_err();
 
-            http::Response::new(body)
-        }
-    });
+// //     assert!(err.is_timeout());
+// //     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+// // }
 
-    let url = format!("http://{}/closes", server.addr());
-    let res = client
-        .get(&url)
-        // longer than client timeout
-        .timeout(Duration::from_secs(5))
-        .send()
-        .expect("get response");
+// #[cfg(feature = "blocking")]
+// #[test]
+// fn timeout_blocking_request() {
+//     let _ = env_logger::try_init();
 
-    let text = res.text().unwrap();
-    assert_eq!(text, "Hello");
-}
+//     // Make Client drop *after* the Server, so the background doesn't
+//     // close too early.
+//     let client = nightfly::blocking::Client::builder().build().unwrap();
 
-#[cfg(feature = "blocking")]
-#[test]
-fn write_timeout_large_body() {
-    let _ = env_logger::try_init();
-    let body = vec![b'x'; 20_000];
-    let len = 8192;
+//     let server = server::http(move |_req| {
+//         async {
+//             // delay returning the response
+//             lunatic::time::sleep(Duration::from_secs(2));
+//             http::Response::default()
+//         }
+//     });
 
-    // Make Client drop *after* the Server, so the background doesn't
-    // close too early.
-    let client = nightfly::blocking::Client::builder()
-        .timeout(Duration::from_millis(500))
-        .build()
-        .unwrap();
+//     let url = format!("http://{}/closes", ADDR);
+//     let err = client
+//         .get(&url)
+//         .timeout(Duration::from_millis(500))
+//         .send()
+//         .unwrap_err();
 
-    let server = server::http(move |_req| {
-        async {
-            // delay returning the response
-            lunatic::time::sleep(Duration::from_secs(2));
-            http::Response::default()
-        }
-    });
+//     assert!(err.is_timeout());
+//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+// }
 
-    let cursor = std::io::Cursor::new(body);
-    let url = format!("http://{}/write-timeout", server.addr());
-    let err = client
-        .post(&url)
-        .body(nightfly::blocking::Body::sized(cursor, len as u64))
-        .send()
-        .unwrap_err();
+// #[cfg(feature = "blocking")]
+// #[test]
+// fn blocking_request_timeout_body() {
+//     let _ = env_logger::try_init();
 
-    assert!(err.is_timeout());
-    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-}
+//     let client = nightfly::blocking::Client::builder()
+//         // this should be overridden
+//         .connect_timeout(Duration::from_millis(200))
+//         // this should be overridden
+//         .timeout(Duration::from_millis(200))
+//         .build()
+//         .unwrap();
+
+//     let server = server::http(move |_req| {
+//         async {
+//             // immediate response, but delayed body
+//             let body = hyper::Body::wrap_stream(futures_util::stream::once(async {
+//                 lunatic::time::sleep(Duration::from_secs(1));
+//                 Ok::<_, std::convert::Infallible>("Hello")
+//             }));
+
+//             http::Response::new(body)
+//         }
+//     });
+
+//     let url = format!("http://{}/closes", ADDR);
+//     let res = client
+//         .get(&url)
+//         // longer than client timeout
+//         .timeout(Duration::from_secs(5))
+//         .send()
+//         .expect("get response");
+
+//     let text = res.text().unwrap();
+//     assert_eq!(text, "Hello");
+// }
+
+// #[cfg(feature = "blocking")]
+// #[test]
+// fn write_timeout_large_body() {
+//     let _ = env_logger::try_init();
+//     let body = vec![b'x'; 20_000];
+//     let len = 8192;
+
+//     // Make Client drop *after* the Server, so the background doesn't
+//     // close too early.
+//     let client = nightfly::blocking::Client::builder()
+//         .timeout(Duration::from_millis(500))
+//         .build()
+//         .unwrap();
+
+//     let server = server::http(move |_req| {
+//         async {
+//             // delay returning the response
+//             lunatic::time::sleep(Duration::from_secs(2));
+//             http::Response::default()
+//         }
+//     });
+
+//     let cursor = std::io::Cursor::new(body);
+//     let url = format!("http://{}/write-timeout", ADDR);
+//     let err = client
+//         .post(&url)
+//         .body(nightfly::blocking::Body::sized(cursor, len as u64))
+//         .send()
+//         .unwrap_err();
+
+//     assert!(err.is_timeout());
+//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+// }

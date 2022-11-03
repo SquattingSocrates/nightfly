@@ -1,49 +1,6 @@
 mod support;
 
-use lunatic::{
-    abstract_process,
-    process::{ProcessRef, StartProcess},
-    spawn_link,
-    supervisor::{Supervisor, SupervisorStrategy},
-    Process, Tag,
-};
-use submillisecond::{response::Response as SubmsResponse, router, Application, RequestContext};
-
-struct ServerSup;
-
-struct ServerProcess(Process<()>);
-
-#[abstract_process]
-impl ServerProcess {
-    #[init]
-    fn init(_: ProcessRef<Self>, _: ()) -> Self {
-        Self(spawn_link!(|| {
-            start_server().unwrap();
-        }))
-    }
-
-    #[terminate]
-    fn terminate(self) {
-        println!("Shutdown process");
-    }
-
-    #[handle_link_trapped]
-    fn handle_link_trapped(&self, _: Tag) {
-        println!("Link trapped");
-    }
-}
-
-impl Supervisor for ServerSup {
-    type Arg = String;
-    type Children = ServerProcess;
-
-    fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
-        // If a child fails, just restart it.
-        config.set_strategy(SupervisorStrategy::OneForOne);
-        // Start One `ServerProcess`
-        config.children_args(((), Some(name)));
-    }
-}
+use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
 
 fn gzip(req: RequestContext) -> SubmsResponse {
     assert_eq!(req.method(), "HEAD");
@@ -70,23 +27,15 @@ fn accept_encoding(req: RequestContext) -> SubmsResponse {
     SubmsResponse::default()
 }
 
-fn start_server() -> std::io::Result<()> {
-    Application::new(router! {
-        HEAD "/gzip" => gzip
-        GET "/accept" => accept
-        GET "/accept-encoding" => accept_encoding
-    })
-    .serve(ADDR)
-}
-
 static ADDR: &'static str = "0.0.0.0:3001";
 
-fn ensure_server() {
-    if let Some(_) = Process::<Process<()>>::lookup("__gzip__") {
-        return;
-    }
-    ServerSup::start("__gzip__".to_owned(), None);
-}
+static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+    HEAD "/gzip" => gzip
+    GET "/accept" => accept
+    GET "/accept-encoding" => accept_encoding
+};
+
+wrap_server!(gzip_server, ROUTER, ADDR);
 
 // ====================================
 // Test cases
@@ -94,7 +43,7 @@ fn ensure_server() {
 
 #[lunatic::test]
 fn test_gzip_empty_body() {
-    let _ = ensure_server();
+    let _ = gzip_server::ensure_server();
 
     let client = nightfly::Client::new();
     let res = client
@@ -109,7 +58,7 @@ fn test_gzip_empty_body() {
 
 #[lunatic::test]
 fn test_accept_header_is_not_changed_if_set() {
-    let _ = ensure_server();
+    let _ = gzip_server::ensure_server();
 
     let client = nightfly::Client::new();
 
@@ -127,7 +76,7 @@ fn test_accept_header_is_not_changed_if_set() {
 
 #[lunatic::test]
 fn test_accept_encoding_header_is_not_changed_if_set() {
-    let _ = ensure_server();
+    let _ = gzip_server::ensure_server();
 
     let client = nightfly::Client::new();
 

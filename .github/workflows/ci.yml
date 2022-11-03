@@ -20,7 +20,6 @@ jobs:
       - nightly
       - msrv
       - android
-      - wasm
       - docs
     steps:
       - run: exit 0
@@ -307,36 +306,3 @@ jobs:
           command: build
           # disable default-tls feature since cross-compiling openssl is dragons
           args: --target aarch64-linux-android --no-default-features
-
-  wasm:
-    name: WASM
-    needs: [style]
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-
-      - name: Install rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-          profile: minimal
-          override: true
-
-      - name: Check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: --target wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
-      - name: Wasm-pack test firefox
-        run: wasm-pack test --headless --firefox
-
-      - name: Wasm-pack test chrome
-        run: wasm-pack test --headless --chrome

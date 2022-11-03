@@ -1,4 +1,3 @@
-#![cfg_attr(target_arch = "wasm32", allow(unused))]
 use std::error::Error as StdError;
 use std::fmt;
 use std::io;
@@ -114,24 +113,6 @@ impl Error {
     /// Returns true if the error is related to the request
     pub fn is_request(&self) -> bool {
         matches!(self.inner.kind, Kind::Request)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    /// Returns true if the error is related to connect
-    pub fn is_connect(&self) -> bool {
-        let mut source = self.source();
-
-        while let Some(err) = source {
-            if let Some(hyper_err) = err.downcast_ref::<hyper::Error>() {
-                if hyper_err.is_connect() {
-                    return true;
-                }
-            }
-
-            source = err.source();
-        }
-
-        false
     }
 
     /// Returns true if the error is related to the request or response body

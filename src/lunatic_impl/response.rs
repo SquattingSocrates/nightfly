@@ -137,7 +137,7 @@ impl HttpResponse {
     #[cfg(feature = "cookies")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
     pub fn cookies<'a>(&'a self) -> impl Iterator<Item = cookie::Cookie<'a>> + 'a {
-        cookie::extract_response_cookies(self.res.headers()).filter_map(Result::ok)
+        cookie::extract_response_cookies(self.headers()).filter_map(Result::ok)
     }
 
     /// Get the final `Url` of this `Response`.
@@ -286,24 +286,25 @@ impl HttpResponse {
         serde_json::from_slice(&full).map_err(crate::error::decode)
     }
 
-    // /// Get the full response body as `Bytes`.
-    // ///
-    // /// # Example
-    // ///
-    // /// ```
-    // /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // /// let bytes = nightfly::get("http://httpbin.org/ip")
-    // ///
-    // ///     .bytes()
-    // ///     ;
-    // ///
-    // /// println!("bytes: {:?}", bytes);
-    // /// # Ok(())
-    // /// # }
-    // /// ```
-    // pub fn bytes(self) -> crate::Result<Bytes> {
-    //     Bytes::try_from(&self.res.body()[..])
-    // }
+    /// Get the full response body as `Bytes`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
+    /// let bytes = nightfly::get("http://httpbin.org/ip")
+    ///
+    ///     .bytes()
+    ///     ;
+    ///
+    /// println!("bytes: {:?}", bytes);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn bytes(self) -> crate::Result<Bytes> {
+        Bytes::try_from(self.body)
+            .map_err(|e| crate::Error::new(crate::error::Kind::Decode, Some(e)))
+    }
 
     /// return vec
     pub fn body(&self) -> Vec<u8> {

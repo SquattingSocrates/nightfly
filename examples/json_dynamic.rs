@@ -8,8 +8,10 @@ use lunatic::Mailbox;
 
 #[lunatic::main]
 fn main(_: Mailbox<()>) -> Result<(), nightfly::Error> {
-    let echo_json: serde_json::Value = nightfly::Client::new()
-        // .post("https://jsonplaceholder.typicode.com/posts")
+    let echo_json: serde_json::Value = nightfly::Client::builder()
+        .user_agent("my-own-user-agent")
+        .build()
+        .unwrap()
         .post("http://eu.httpbin.org/anything")
         .json(&serde_json::json!({
             "title": "Nightfly.rs",

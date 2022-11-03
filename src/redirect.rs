@@ -234,6 +234,7 @@ pub(crate) enum ActionKind {
 }
 
 pub(crate) fn remove_sensitive_headers(headers: &mut HeaderMap, next: &Url, previous: &[Url]) {
+    println!("REMOVED SENSITIVE HEADERS {:?}", headers);
     if let Some(previous) = previous.last() {
         let cross_host = next.host_str() != previous.host_str()
             || next.port_or_known_default() != previous.port_or_known_default();
