@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use base64::write::EncoderWriter as Base64Encoder;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, LOCATION, REFERER, TRANSFER_ENCODING};
-use http::{Response, StatusCode};
+use http::StatusCode;
 use serde::Serialize;
 #[cfg(feature = "json")]
 use serde_json;
@@ -17,7 +17,7 @@ use super::response::HttpResponse;
 #[cfg(feature = "multipart")]
 use crate::header::CONTENT_LENGTH;
 use crate::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
-use crate::into_url::{expect_uri, try_uri};
+use crate::into_url::try_uri;
 use crate::lunatic_impl::client::add_cookie_header;
 use crate::redirect::remove_sensitive_headers;
 use crate::{cookie, error, redirect, Body, Method, Url};

@@ -74,7 +74,7 @@ fn test_auto_headers() {
 
     let url = format!("http://{}/auto_headers", ADDR);
     let res = nightfly::Client::builder()
-        .no_proxy()
+        // .no_proxy()
         .build()
         .unwrap()
         .get(&url)

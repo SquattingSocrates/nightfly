@@ -163,9 +163,6 @@
 //! enabled or disabled:
 //!
 //! - **cookies**: Provides cookie session support.
-//! - **gzip**: Provides response body gzip decompression.
-//! - **brotli**: Provides response body brotli decompression.
-//! - **deflate**: Provides response body deflate decompression.
 //! - **multipart**: Provides functionality for multipart forms.
 //! - **socks**: Provides SOCKS5 proxy support.
 //!
@@ -253,18 +250,13 @@ fn _assert_impls() {
 #[cfg(feature = "multipart")]
 pub use self::lunatic_impl::multipart;
 pub use self::lunatic_impl::{Body, Client, ClientBuilder, HttpResponse, Request, RequestBuilder};
-pub use self::proxy::Proxy;
 #[cfg(feature = "__tls")]
 // Re-exports, to be removed in a future release
 pub use tls::{Certificate, Identity};
 
-mod connect;
 #[cfg(feature = "cookies")]
 pub mod cookie;
 mod lunatic_impl;
-// #[cfg(feature = "trust-dns")]
-// mod dns;
-mod proxy;
 pub mod redirect;
 #[cfg(feature = "__tls")]
 pub mod tls;

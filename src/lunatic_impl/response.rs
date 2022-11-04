@@ -2,8 +2,6 @@ use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::net::SocketAddr;
-use std::pin::Pin;
-use std::time::Duration;
 
 use bytes::Bytes;
 use encoding_rs::{Encoding, UTF_8};
@@ -16,44 +14,15 @@ use serde::de::DeserializeOwned;
 use serde_json;
 use url::Url;
 
-use super::decoder::Accepts;
 #[cfg(feature = "cookies")]
 use crate::cookie;
-use crate::Client;
 
-/// Extra information about the transport when an HttpConnector is used.
-///
-/// # Example
-///
-/// ```
-/// # async fn doc() -> hyper::Result<()> {
-/// use hyper::Uri;
-/// use hyper::client::{Client, connect::HttpInfo};
-///
-/// let client = Client::new();
-/// let uri = Uri::from_static("http://example.com");
-///
-/// let res = client.get(uri).await?;
-/// res
-///     .extensions()
-///     .get::<HttpInfo>()
-///     .map(|info| {
-///         println!("remote addr = {}", info.remote_addr());
-///     });
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Note
-///
-/// If a different connector is used besides [`HttpConnector`](HttpConnector),
-/// this value will not exist in the extensions. Consult that specific
-/// connector to see what "extra" information it might provide to responses.
-#[derive(Clone, Debug)]
-pub struct HttpInfo {
-    remote_addr: SocketAddr,
-    local_addr: SocketAddr,
-}
+// /// Extra information about the transport when an HttpConnector is used.
+// #[derive(Clone, Debug)]
+// pub struct HttpInfo {
+//     remote_addr: SocketAddr,
+//     local_addr: SocketAddr,
+// }
 
 /// A Response to a submitted `Request`.
 pub struct HttpResponse {
@@ -69,28 +38,10 @@ pub struct HttpResponse {
     pub headers: HeaderMap<HeaderValue>,
 
     pub(super) url: Url,
+    // pub info: HttpInfo,
 }
 
 impl HttpResponse {
-    pub(super) fn new(
-        res: http::Response<Vec<u8>>,
-        url: Url,
-        accepts: &Client,
-        timeout: Option<Duration>,
-    ) -> HttpResponse {
-        let (mut parts, body) = res.into_parts();
-        // let decoder = Decoder::detect(&mut parts.headers, body, accepts);
-        // let body = decoder.decode();
-
-        HttpResponse {
-            body,
-            url,
-            version: parts.version,
-            status: parts.status,
-            headers: parts.headers,
-        }
-    }
-
     /// Get the `StatusCode` of this `Response`.
     #[inline]
     pub fn status(&self) -> StatusCode {

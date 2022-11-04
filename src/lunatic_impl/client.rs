@@ -19,7 +19,6 @@ use super::http_stream::HttpStream;
 use super::request::{PendingRequest, Request, RequestBuilder};
 use super::response::HttpResponse;
 use super::Body;
-use crate::connect::{Connector, HttpConnector};
 #[cfg(feature = "cookies")]
 use crate::cookie;
 use crate::error;
@@ -31,7 +30,7 @@ use crate::tls::{self, TlsBackend};
 use crate::Certificate;
 #[cfg(any(feature = "native-tls", feature = "__rustls"))]
 use crate::Identity;
-use crate::{IntoUrl, Method, Proxy, Url};
+use crate::{IntoUrl, Method, Url};
 
 /// An asynchronous `Client` to make Requests with.
 ///
@@ -55,7 +54,7 @@ pub struct Client {
     pub(crate) redirect_policy: redirect::Policy,
     pub(crate) referer: bool,
     pub(crate) request_timeout: Option<Duration>,
-    pub(crate) proxies: Arc<Vec<Proxy>>,
+    // pub(crate) proxies: Arc<Vec<Proxy>>,
     pub(crate) proxies_maybe_http_auth: bool,
     pub(crate) https_only: bool,
     pub(crate) stream: Option<HttpStream>,
@@ -88,8 +87,8 @@ struct Config {
     tcp_keepalive: Option<Duration>,
     #[cfg(any(feature = "native-tls", feature = "__rustls"))]
     identity: Option<Identity>,
-    proxies: Vec<Proxy>,
-    auto_sys_proxy: bool,
+    // proxies: Vec<Proxy>,
+    // auto_sys_proxy: bool,
     redirect_policy: redirect::Policy,
     referer: bool,
     timeout: Option<Duration>,
@@ -118,7 +117,7 @@ struct Config {
     nodelay: bool,
     #[cfg(feature = "cookies")]
     cookie_store: Option<Arc<dyn cookie::CookieStore>>,
-    trust_dns: bool,
+    // trust_dns: bool,
     error: Option<crate::Error>,
     https_only: bool,
     dns_overrides: HashMap<String, Vec<SocketAddr>>,
@@ -154,8 +153,8 @@ impl ClientBuilder {
                 // TODO: Re-enable default duration once hyper's HttpConnector is fixed
                 // to no longer error when an option fails.
                 tcp_keepalive: None, //Some(Duration::from_secs(60)),
-                proxies: Vec::new(),
-                auto_sys_proxy: true,
+                // proxies: Vec::new(),
+                // auto_sys_proxy: true,
                 redirect_policy: redirect::Policy::default(),
                 referer: true,
                 timeout: None,
@@ -184,7 +183,6 @@ impl ClientBuilder {
                 http2_keep_alive_while_idle: false,
                 local_address: None,
                 nodelay: true,
-                trust_dns: cfg!(feature = "trust-dns"),
                 #[cfg(feature = "cookies")]
                 cookie_store: None,
                 https_only: false,
@@ -206,265 +204,13 @@ impl ClientBuilder {
             return Err(err);
         }
 
-        let mut proxies = config.proxies;
-        if config.auto_sys_proxy {
-            proxies.push(Proxy::system());
-        }
-        let proxies = Arc::new(proxies);
+        // let mut proxies = config.proxies;
+        // if config.auto_sys_proxy {
+        //     proxies.push(Proxy::system());
+        // }
+        // let proxies = Arc::new(proxies);
 
-        let mut connector = {
-            #[cfg(feature = "__tls")]
-            fn user_agent(headers: &HeaderMap) -> Option<HeaderValue> {
-                headers.get(USER_AGENT).cloned()
-            }
-
-            let http = match config.trust_dns {
-                false => {
-                    if config.dns_overrides.is_empty() {
-                        HttpConnector::new_gai()
-                    } else {
-                        HttpConnector::new_gai_with_overrides(config.dns_overrides)
-                    }
-                }
-                #[cfg(feature = "trust-dns")]
-                true => {
-                    if config.dns_overrides.is_empty() {
-                        HttpConnector::new_trust_dns()?
-                    } else {
-                        HttpConnector::new_trust_dns_with_overrides(config.dns_overrides)?
-                    }
-                }
-                #[cfg(not(feature = "trust-dns"))]
-                true => unreachable!("trust-dns shouldn't be enabled unless the feature is"),
-            };
-
-            #[cfg(feature = "__tls")]
-            match config.tls {
-                #[cfg(feature = "default-tls")]
-                TlsBackend::Default => {
-                    let mut tls = TlsConnector::builder();
-
-                    #[cfg(feature = "native-tls-alpn")]
-                    {
-                        match config.http_version_pref {
-                            HttpVersionPref::Http1 => {
-                                tls.request_alpns(&["http/1.1"]);
-                            }
-                            HttpVersionPref::Http2 => {
-                                tls.request_alpns(&["h2"]);
-                            }
-                            HttpVersionPref::All => {
-                                tls.request_alpns(&["h2", "http/1.1"]);
-                            }
-                        }
-                    }
-
-                    #[cfg(feature = "native-tls")]
-                    {
-                        tls.danger_accept_invalid_hostnames(!config.hostname_verification);
-                    }
-
-                    tls.danger_accept_invalid_certs(!config.certs_verification);
-
-                    tls.disable_built_in_roots(!config.tls_built_in_root_certs);
-
-                    for cert in config.root_certs {
-                        cert.add_to_native_tls(&mut tls);
-                    }
-
-                    #[cfg(feature = "native-tls")]
-                    {
-                        if let Some(id) = config.identity {
-                            id.add_to_native_tls(&mut tls)?;
-                        }
-                    }
-
-                    if let Some(min_tls_version) = config.min_tls_version {
-                        let protocol = min_tls_version.to_native_tls().ok_or_else(|| {
-                            // TLS v1.3. This would be entirely reasonable,
-                            // native-tls just doesn't support it.
-                            // https://github.com/sfackler/rust-native-tls/issues/140
-                            crate::error::builder("invalid minimum TLS version for backend")
-                        })?;
-                        tls.min_protocol_version(Some(protocol));
-                    }
-
-                    if let Some(max_tls_version) = config.max_tls_version {
-                        let protocol = max_tls_version.to_native_tls().ok_or_else(|| {
-                            // TLS v1.3.
-                            // We could arguably do max_protocol_version(None), given
-                            // that 1.4 does not exist yet, but that'd get messy in the
-                            // future.
-                            crate::error::builder("invalid maximum TLS version for backend")
-                        })?;
-                        tls.max_protocol_version(Some(protocol));
-                    }
-
-                    Connector::new_default_tls(
-                        http,
-                        tls,
-                        proxies.clone(),
-                        user_agent(&config.headers),
-                        config.local_address,
-                        config.nodelay,
-                    )?
-                }
-                #[cfg(feature = "native-tls")]
-                TlsBackend::BuiltNativeTls(conn) => Connector::from_built_default_tls(
-                    http,
-                    conn,
-                    proxies.clone(),
-                    user_agent(&config.headers),
-                    config.local_address,
-                    config.nodelay,
-                ),
-                #[cfg(feature = "__rustls")]
-                TlsBackend::BuiltRustls(conn) => Connector::new_rustls_tls(
-                    http,
-                    conn,
-                    proxies.clone(),
-                    user_agent(&config.headers),
-                    config.local_address,
-                    config.nodelay,
-                ),
-                #[cfg(feature = "__rustls")]
-                TlsBackend::Rustls => {
-                    use crate::tls::NoVerifier;
-
-                    // Set root certificates.
-                    let mut root_cert_store = rustls::RootCertStore::empty();
-                    for cert in config.root_certs {
-                        cert.add_to_rustls(&mut root_cert_store)?;
-                    }
-
-                    #[cfg(feature = "rustls-tls-webpki-roots")]
-                    if config.tls_built_in_root_certs {
-                        use rustls::OwnedTrustAnchor;
-
-                        let trust_anchors =
-                            webpki_roots::TLS_SERVER_ROOTS.0.iter().map(|trust_anchor| {
-                                OwnedTrustAnchor::from_subject_spki_name_constraints(
-                                    trust_anchor.subject,
-                                    trust_anchor.spki,
-                                    trust_anchor.name_constraints,
-                                )
-                            });
-
-                        root_cert_store.add_server_trust_anchors(trust_anchors);
-                    }
-
-                    #[cfg(feature = "rustls-tls-native-roots")]
-                    if config.tls_built_in_root_certs {
-                        let mut valid_count = 0;
-                        let mut invalid_count = 0;
-                        for cert in rustls_native_certs::load_native_certs()
-                            .map_err(crate::error::builder)?
-                        {
-                            let cert = rustls::Certificate(cert.0);
-                            // Continue on parsing errors, as native stores often include ancient or syntactically
-                            // invalid certificates, like root certificates without any X509 extensions.
-                            // Inspiration: https://github.com/rustls/rustls/blob/633bf4ba9d9521a95f68766d04c22e2b01e68318/rustls/src/anchors.rs#L105-L112
-                            match root_cert_store.add(&cert) {
-                                Ok(_) => valid_count += 1,
-                                Err(err) => {
-                                    invalid_count += 1;
-                                    lunatic_log::warn!(
-                                        "rustls failed to parse DER certificate {:?} {:?}",
-                                        &err,
-                                        &cert
-                                    );
-                                }
-                            }
-                        }
-                        if valid_count == 0 && invalid_count > 0 {
-                            return Err(crate::error::builder(
-                                "zero valid certificates found in native root store",
-                            ));
-                        }
-                    }
-
-                    // Set TLS versions.
-                    let mut versions = rustls::ALL_VERSIONS.to_vec();
-
-                    if let Some(min_tls_version) = config.min_tls_version {
-                        versions.retain(|&supported_version| {
-                            match tls::Version::from_rustls(supported_version.version) {
-                                Some(version) => version >= min_tls_version,
-                                // Assume it's so new we don't know about it, allow it
-                                // (as of writing this is unreachable)
-                                None => true,
-                            }
-                        });
-                    }
-
-                    if let Some(max_tls_version) = config.max_tls_version {
-                        versions.retain(|&supported_version| {
-                            match tls::Version::from_rustls(supported_version.version) {
-                                Some(version) => version <= max_tls_version,
-                                None => false,
-                            }
-                        });
-                    }
-
-                    // Build TLS config
-                    let config_builder = rustls::ClientConfig::builder()
-                        .with_safe_default_cipher_suites()
-                        .with_safe_default_kx_groups()
-                        .with_protocol_versions(&versions)
-                        .map_err(crate::error::builder)?
-                        .with_root_certificates(root_cert_store);
-
-                    // Finalize TLS config
-                    let mut tls = if let Some(id) = config.identity {
-                        id.add_to_rustls(config_builder)?
-                    } else {
-                        config_builder.with_no_client_auth()
-                    };
-
-                    // Certificate verifier
-                    if !config.certs_verification {
-                        tls.dangerous()
-                            .set_certificate_verifier(Arc::new(NoVerifier));
-                    }
-
-                    // ALPN protocol
-                    match config.http_version_pref {
-                        HttpVersionPref::Http1 => {
-                            tls.alpn_protocols = vec!["http/1.1".into()];
-                        }
-                        HttpVersionPref::Http2 => {
-                            tls.alpn_protocols = vec!["h2".into()];
-                        }
-                        HttpVersionPref::All => {
-                            tls.alpn_protocols = vec!["h2".into(), "http/1.1".into()];
-                        }
-                    }
-
-                    Connector::new_rustls_tls(
-                        http,
-                        tls,
-                        proxies.clone(),
-                        user_agent(&config.headers),
-                        config.local_address,
-                        config.nodelay,
-                    )
-                }
-                #[cfg(any(feature = "native-tls", feature = "__rustls",))]
-                TlsBackend::UnknownPreconfigured => {
-                    return Err(crate::error::builder(
-                        "Unknown TLS backend passed to `use_preconfigured_tls`",
-                    ));
-                }
-            }
-
-            #[cfg(not(feature = "__tls"))]
-            Connector::new(http, proxies.clone(), config.local_address, config.nodelay)
-        };
-
-        connector.set_timeout(config.connect_timeout);
-        // connector.set_verbose(config.connection_verbose);
-
-        let mut builder = Client::builder();
+        // let mut builder = Client::builder();
         // if matches!(config.http_version_pref, HttpVersionPref::Http2) {
         //     builder.http2_only(true);
         // }
@@ -497,21 +243,21 @@ impl ClientBuilder {
         // builder.pool_max_idle_per_host(config.pool_max_idle_per_host);
         // connector.set_keepalive(config.tcp_keepalive);
 
-        if config.http09_responses {
-            builder = builder.http09_responses();
-        }
+        // if config.http09_responses {
+        //     builder = builder.http09_responses();
+        // }
 
-        if config.http1_title_case_headers {
-            builder = builder.http1_title_case_headers();
-        }
+        // if config.http1_title_case_headers {
+        //     builder = builder.http1_title_case_headers();
+        // }
 
-        if config.http1_allow_obsolete_multiline_headers_in_responses {
-            builder = builder.http1_allow_obsolete_multiline_headers_in_responses(true);
-        }
+        // if config.http1_allow_obsolete_multiline_headers_in_responses {
+        //     builder = builder.http1_allow_obsolete_multiline_headers_in_responses(true);
+        // }
 
         // let hyper_client = builder.build(connector);
 
-        let proxies_maybe_http_auth = proxies.iter().any(|p| p.maybe_has_http_auth());
+        // let proxies_maybe_http_auth = proxies.iter().any(|p| p.maybe_has_http_auth());
 
         Ok(Client {
             accepts: config.accepts,
@@ -521,8 +267,8 @@ impl ClientBuilder {
             redirect_policy: config.redirect_policy,
             referer: config.referer,
             request_timeout: config.timeout,
-            proxies,
-            proxies_maybe_http_auth,
+            // proxies,
+            proxies_maybe_http_auth: false,
             https_only: config.https_only,
             stream: None,
         })
@@ -718,9 +464,6 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `deflate` feature to be enabled
-    #[cfg(feature = "deflate")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "deflate")))]
     pub fn deflate(mut self, enable: bool) -> ClientBuilder {
         self.config.accepts.deflate = enable;
         self
@@ -766,14 +509,8 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use deflate decompression
     /// even if another dependency were to enable the optional `deflate` feature.
     pub fn no_deflate(self) -> ClientBuilder {
-        #[cfg(feature = "deflate")]
         {
             self.deflate(false)
-        }
-
-        #[cfg(not(feature = "deflate"))]
-        {
-            self
         }
     }
 
@@ -797,25 +534,25 @@ impl ClientBuilder {
 
     // Proxy options
 
-    /// Add a `Proxy` to the list of proxies the `Client` will use.
-    ///
-    /// # Note
-    ///
-    /// Adding a proxy will disable the automatic usage of the "system" proxy.
-    pub fn proxy(mut self, proxy: Proxy) -> ClientBuilder {
-        self.config.proxies.push(proxy);
-        self.config.auto_sys_proxy = false;
-        self
-    }
+    // /// Add a `Proxy` to the list of proxies the `Client` will use.
+    // ///
+    // /// # Note
+    // ///
+    // /// Adding a proxy will disable the automatic usage of the "system" proxy.
+    // pub fn proxy(mut self, proxy: Proxy) -> ClientBuilder {
+    //     self.config.proxies.push(proxy);
+    //     self.config.auto_sys_proxy = false;
+    //     self
+    // }
 
-    /// Clear all `Proxies`, so `Client` will use no proxy anymore.
-    ///
-    /// This also disables the automatic usage of the "system" proxy.
-    pub fn no_proxy(mut self) -> ClientBuilder {
-        self.config.proxies.clear();
-        self.config.auto_sys_proxy = false;
-        self
-    }
+    // /// Clear all `Proxies`, so `Client` will use no proxy anymore.
+    // ///
+    // /// This also disables the automatic usage of the "system" proxy.
+    // pub fn no_proxy(mut self) -> ClientBuilder {
+    //     self.config.proxies.clear();
+    //     self.config.auto_sys_proxy = false;
+    //     self
+    // }
 
     // Timeout options
 
@@ -1506,9 +1243,9 @@ impl Client {
 
         f.field("accepts", &self.accepts);
 
-        if !self.proxies.is_empty() {
-            f.field("proxies", &self.proxies);
-        }
+        // if !self.proxies.is_empty() {
+        //     f.field("proxies", &self.proxies);
+        // }
 
         // if !self.redirect_policy.is_default() {
         //     f.field("redirect_policy", &self.redirect_policy);
@@ -1530,7 +1267,7 @@ impl Client {
         req: Request,
         urls: Vec<Url>,
     ) -> Result<HttpResponse, crate::Error> {
-        let (method, url, mut headers, body, timeout, version) = req.clone().pieces();
+        let (method, url, mut headers, body, _timeout, version) = req.clone().pieces();
         if url.scheme() != "http" && url.scheme() != "https" {
             return Err(error::url_bad_scheme(url));
         }
@@ -1575,23 +1312,20 @@ impl Client {
 
         self.proxy_auth(&uri, &mut headers);
 
-        let timeout = timeout.or(self.request_timeout);
-
-        // *req.headers_mut() = headers.clone();
-
-        // let in_flight = self.hyper.request(req);
-
         let mut encoded = request_to_vec(method, url.clone(), headers, body, version);
 
         let mut stream = self.ensure_connection(url.clone())?;
+        // if let Some(timeout) = self.request_timeout {
+        //     stream.set
+        // }
 
         stream.write_all(&mut encoded).unwrap();
 
         let response_buffer = Vec::new();
 
-        match parse_response(response_buffer, stream.clone(), url, req.clone(), self) {
+        match parse_response(response_buffer, stream.clone(), req.clone(), self) {
             Ok(res) => PendingRequest::new(res, self, req, urls).resolve(),
-            Err(e) => unimplemented!(),
+            Err(_e) => unimplemented!(),
         }
     }
 
@@ -1611,15 +1345,15 @@ impl Client {
             return;
         }
 
-        for proxy in self.proxies.iter() {
-            if proxy.is_match(dst) {
-                if let Some(header) = proxy.http_basic_auth(dst) {
-                    headers.insert(PROXY_AUTHORIZATION, header);
-                }
+        // for proxy in self.proxies.iter() {
+        //     if proxy.is_match(dst) {
+        //         if let Some(header) = proxy.http_basic_auth(dst) {
+        //             headers.insert(PROXY_AUTHORIZATION, header);
+        //         }
 
-                break;
-            }
-        }
+        //         break;
+        //     }
+        // }
     }
 }
 
@@ -1653,9 +1387,9 @@ impl Config {
 
         f.field("accepts", &self.accepts);
 
-        if !self.proxies.is_empty() {
-            f.field("proxies", &self.proxies);
-        }
+        // if !self.proxies.is_empty() {
+        //     f.field("proxies", &self.proxies);
+        // }
 
         if !self.redirect_policy.is_default() {
             f.field("redirect_policy", &self.redirect_policy);

@@ -1,17 +1,17 @@
 # nightfly
 
-## Disclaimer
-This project is still highly experimental and therefore not to be used in production
+This project is an ongoing effort to port the reqwest library to the lunatic runtime
 
-## Next steps:
+## What works:
 
 * [x] (de)compression with brotli, gzip and deflate
 * [x] redirect handling
+* [x] cookies and caching
+* [ ] timeouts
+* [ ] chunked responses
 * [ ] proxy handling
-* [ ] cookies and caching
 * [ ] upgrade, socks5 support and websockets
 * [ ] custom dns resolver
-* [ ] http 2 and maybe 3
 
 <!-- [![crates.io](https://img.shields.io/crates/v/nightfly.svg)](https://crates.io/crates/nightfly) -->
 <!-- [![Documentation](https://docs.rs/nightfly/badge.svg)](https://docs.rs/nightfly) -->

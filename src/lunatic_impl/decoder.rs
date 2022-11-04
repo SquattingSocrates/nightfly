@@ -2,41 +2,22 @@ use std::convert::TryFrom;
 use std::fmt;
 use std::io::Read;
 
-#[cfg(feature = "deflate")]
-use flate2::read::ZlibDecoder;
-
-#[cfg(feature = "gzip")]
-use flate2::read::GzDecoder;
+use flate2::read::{GzDecoder, ZlibDecoder};
 
 use http::{
-    header::{
-        CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, LOCATION, REFERER, TRANSFER_ENCODING,
-    },
-    HeaderMap, HeaderValue, Method, Response, StatusCode,
+    header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING},
+    HeaderMap,
 };
 
 use httparse::{Status, EMPTY_HEADER};
-// #[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
-// use flate2::
-// #[cfg(any(feature = "gzip", feature = "brotli", feature = "deflate"))]
-// use tokio_util::io::StreamReader;
-use url::Url;
 
 use super::http_stream::HttpStream;
-use crate::{
-    error,
-    into_url::{expect_uri, try_uri},
-    redirect::{self, remove_sensitive_headers},
-    Client, HttpResponse, Request,
-};
+use crate::{Client, HttpResponse, Request};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Accepts {
-    #[cfg(feature = "gzip")]
     pub(super) gzip: bool,
-    #[cfg(feature = "brotli")]
     pub(super) brotli: bool,
-    #[cfg(feature = "deflate")]
     pub(super) deflate: bool,
 }
 
@@ -49,11 +30,8 @@ pub(crate) struct Decoder {
 }
 
 enum MessageEncoding {
-    #[cfg(feature = "gzip")]
     Gzip,
-    #[cfg(feature = "brotli")]
     Brotli,
-    // #[cfg(feature = "deflate")]
     Deflate,
     Octets,
 }
@@ -78,7 +56,6 @@ impl Decoder {
     /// A gzip decoder.
     ///
     /// This decoder will buffer and decompress chunks that are gzipped.
-    #[cfg(feature = "gzip")]
     fn gzip(reader: HttpBodyReader) -> Decoder {
         Decoder {
             reader,
@@ -89,7 +66,6 @@ impl Decoder {
     /// A brotli decoder.
     ///
     /// This decoder will buffer and decompress chunks that are brotlied.
-    #[cfg(feature = "brotli")]
     fn brotli(reader: HttpBodyReader) -> Decoder {
         Decoder {
             reader,
@@ -100,7 +76,6 @@ impl Decoder {
     /// A deflate decoder.
     ///
     /// This decoder will buffer and decompress chunks that are deflated.
-    // #[cfg(feature = "deflate")]
     fn deflate(reader: HttpBodyReader) -> Decoder {
         Decoder {
             reader,
@@ -141,21 +116,18 @@ impl Decoder {
         }
         let buf = if !self.reader.no_content_length_required() {
             match &self.encoding {
-                #[cfg(feature = "brotli")]
                 MessageEncoding::Brotli => {
                     let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
                     let mut buf = Vec::new();
                     let _ = decoder.read_to_end(&mut buf).unwrap();
                     buf
                 }
-                #[cfg(feature = "gzip")]
                 MessageEncoding::Gzip => {
                     let mut decoder = GzDecoder::new(&mut self.reader);
                     let mut buf = Vec::new();
                     let _ = decoder.read_to_end(&mut buf).unwrap();
                     buf
                 }
-                // #[cfg(feature = "deflate")]
                 MessageEncoding::Deflate => {
                     let mut decoder = ZlibDecoder::new(&mut self.reader);
                     let mut buf = Vec::new();
@@ -176,9 +148,7 @@ impl Decoder {
         }
     }
 
-    // #[cfg(any(feature = "brotli", feature = "gzip", feature = "deflate"))]
     fn detect_encoding(headers: &mut HeaderMap, encoding_str: &str) -> bool {
-        use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING};
         use lunatic_log::warn;
 
         let mut is_content_encoded = {
@@ -214,21 +184,18 @@ impl Decoder {
     /// Uses the correct variant by inspecting the Content-Encoding header.
     pub(super) fn detect(mut reader: HttpBodyReader, _accepts: Accepts) -> Decoder {
         let _headers = reader.res.headers_mut();
-        #[cfg(feature = "gzip")]
         {
             if _accepts.gzip && Decoder::detect_encoding(_headers, "gzip") {
                 return Decoder::gzip(reader);
             }
         }
 
-        #[cfg(feature = "brotli")]
         {
             if _accepts.brotli && Decoder::detect_encoding(_headers, "br") {
                 return Decoder::brotli(reader);
             }
         }
 
-        // #[cfg(feature = "deflate")]
         {
             if _accepts.deflate && Decoder::detect_encoding(_headers, "deflate") {
                 return Decoder::deflate(reader);
@@ -258,7 +225,6 @@ pub(crate) enum ParseResponseError {
 pub(crate) fn parse_response(
     mut response_buffer: Vec<u8>,
     mut stream: HttpStream,
-    url: Url,
     req: Request,
     client: &mut Client,
 ) -> ResponseResult {
@@ -331,6 +297,7 @@ pub(crate) fn parse_response(
             } else if header.name.to_lowercase() == "transfer-length" {
                 let value_string = std::str::from_utf8(header.value).unwrap();
                 let length = value_string.parse::<usize>().unwrap();
+                content_lengt = Some(length);
             }
             response.header(header.name, header.value)
         });
@@ -378,17 +345,17 @@ impl HttpBodyReader {
     }
 }
 
-fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
-    if next.scheme() == "http" && previous.scheme() == "https" {
-        return None;
-    }
+// fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
+//     if next.scheme() == "http" && previous.scheme() == "https" {
+//         return None;
+//     }
 
-    let mut referer = previous.clone();
-    let _ = referer.set_username("");
-    let _ = referer.set_password(None);
-    referer.set_fragment(None);
-    referer.as_str().parse().ok()
-}
+//     let mut referer = previous.clone();
+//     let _ = referer.set_username("");
+//     let _ = referer.set_password(None);
+//     referer.set_fragment(None);
+//     referer.as_str().parse().ok()
+// }
 
 impl Read for HttpBodyReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -417,16 +384,13 @@ impl Read for HttpBodyReader {
 // ===== impl Accepts =====
 
 impl Accepts {
-    pub(super) fn none() -> Self {
-        Accepts {
-            #[cfg(feature = "gzip")]
-            gzip: false,
-            #[cfg(feature = "brotli")]
-            brotli: false,
-            #[cfg(feature = "deflate")]
-            deflate: false,
-        }
-    }
+    // pub(super) fn none() -> Self {
+    //     Accepts {
+    //         gzip: false,
+    //         brotli: false,
+    //         deflate: false,
+    //     }
+    // }
 
     pub(super) fn as_str(&self) -> Option<&'static str> {
         match (self.is_gzip(), self.is_brotli(), self.is_deflate()) {
@@ -442,50 +406,23 @@ impl Accepts {
     }
 
     fn is_gzip(&self) -> bool {
-        #[cfg(feature = "gzip")]
-        {
-            self.gzip
-        }
-
-        #[cfg(not(feature = "gzip"))]
-        {
-            false
-        }
+        self.gzip
     }
 
     fn is_brotli(&self) -> bool {
-        #[cfg(feature = "brotli")]
-        {
-            self.brotli
-        }
-
-        #[cfg(not(feature = "brotli"))]
-        {
-            false
-        }
+        self.brotli
     }
 
     fn is_deflate(&self) -> bool {
-        #[cfg(feature = "deflate")]
-        {
-            self.deflate
-        }
-
-        #[cfg(not(feature = "deflate"))]
-        {
-            false
-        }
+        self.deflate
     }
 }
 
 impl Default for Accepts {
     fn default() -> Accepts {
         Accepts {
-            #[cfg(feature = "gzip")]
             gzip: true,
-            #[cfg(feature = "brotli")]
             brotli: true,
-            #[cfg(feature = "deflate")]
             deflate: true,
         }
     }

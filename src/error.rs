@@ -116,9 +116,9 @@ impl Error {
     }
 
     /// Returns true if the error is related to the request or response body
-    pub fn is_body(&self) -> bool {
-        matches!(self.inner.kind, Kind::Body)
-    }
+    // pub fn is_body(&self) -> bool {
+    //     matches!(self.inner.kind, Kind::Body)
+    // }
 
     /// Returns true if the error is related to decoding the response's body
     pub fn is_decode(&self) -> bool {
@@ -163,10 +163,10 @@ impl fmt::Display for Error {
         match self.inner.kind {
             Kind::Builder => f.write_str("builder error")?,
             Kind::Request => f.write_str("error sending request")?,
-            Kind::Body => f.write_str("request or response body error")?,
+            // Kind::Body => f.write_str("request or response body error")?,
             Kind::Decode => f.write_str("error decoding response body")?,
             Kind::Redirect => f.write_str("error following redirect")?,
-            Kind::Upgrade => f.write_str("error upgrading connection")?,
+            // Kind::Upgrade => f.write_str("error upgrading connection")?,
             Kind::Status(ref code) => {
                 let prefix = if code.is_client_error() {
                     "HTTP status client error"
@@ -202,9 +202,9 @@ pub(crate) enum Kind {
     Request,
     Redirect,
     Status(StatusCode),
-    Body,
+    // Body,
     Decode,
-    Upgrade,
+    // Upgrade,
 }
 
 // constructors
@@ -213,17 +213,17 @@ pub(crate) fn builder<E: Into<BoxError>>(e: E) -> Error {
     Error::new(Kind::Builder, Some(e))
 }
 
-pub(crate) fn body<E: Into<BoxError>>(e: E) -> Error {
-    Error::new(Kind::Body, Some(e))
-}
+// pub(crate) fn body<E: Into<BoxError>>(e: E) -> Error {
+//     Error::new(Kind::Body, Some(e))
+// }
 
 pub(crate) fn decode<E: Into<BoxError>>(e: E) -> Error {
     Error::new(Kind::Decode, Some(e))
 }
 
-pub(crate) fn request<E: Into<BoxError>>(e: E) -> Error {
-    Error::new(Kind::Request, Some(e))
-}
+// pub(crate) fn request<E: Into<BoxError>>(e: E) -> Error {
+//     Error::new(Kind::Request, Some(e))
+// }
 
 pub(crate) fn redirect<E: Into<BoxError>>(e: E, url: Url) -> Error {
     Error::new(Kind::Redirect, Some(e)).with_url(url)
@@ -237,9 +237,9 @@ pub(crate) fn url_bad_scheme(url: Url) -> Error {
     Error::new(Kind::Builder, Some(BadScheme)).with_url(url)
 }
 
-pub(crate) fn upgrade<E: Into<BoxError>>(e: E) -> Error {
-    Error::new(Kind::Upgrade, Some(e))
-}
+// pub(crate) fn upgrade<E: Into<BoxError>>(e: E) -> Error {
+//     Error::new(Kind::Upgrade, Some(e))
+// }
 
 // io::Error helpers
 
@@ -288,19 +288,19 @@ impl StdError for BadScheme {}
 mod tests {
     use super::*;
 
-    fn assert_send<T: Send>() {}
-    fn assert_sync<T: Sync>() {}
+    // fn assert_send<T: Send>() {}
+    // fn assert_sync<T: Sync>() {}
 
-    #[test]
-    fn test_source_chain() {
-        let root = Error::new(Kind::Request, None::<Error>);
-        assert!(root.source().is_none());
+    // #[test]
+    // fn test_source_chain() {
+    //     let root = Error::new(Kind::Request, None::<Error>);
+    //     assert!(root.source().is_none());
 
-        let link = super::body(root);
-        assert!(link.source().is_some());
-        assert_send::<Error>();
-        assert_sync::<Error>();
-    }
+    //     let link = super::body(root);
+    //     assert!(link.source().is_some());
+    //     assert_send::<Error>();
+    //     assert_sync::<Error>();
+    // }
 
     #[test]
     fn mem_size_of() {
@@ -308,19 +308,19 @@ mod tests {
         assert_eq!(size_of::<Error>(), size_of::<usize>());
     }
 
-    #[test]
-    fn roundtrip_io_error() {
-        let orig = super::request("orig");
-        // Convert nightfly::Error into an io::Error...
-        let io = orig.into_io();
-        // Convert that io::Error back into a nightfly::Error...
-        let err = super::decode_io(io);
-        // It should have pulled out the original, not nested it...
-        match err.inner.kind {
-            Kind::Request => (),
-            _ => panic!("{:?}", err),
-        }
-    }
+    // #[test]
+    // fn roundtrip_io_error() {
+    //     let orig = super::request("orig");
+    //     // Convert nightfly::Error into an io::Error...
+    //     let io = orig.into_io();
+    //     // Convert that io::Error back into a nightfly::Error...
+    //     let err = super::decode_io(io);
+    //     // It should have pulled out the original, not nested it...
+    //     match err.inner.kind {
+    //         Kind::Request => (),
+    //         _ => panic!("{:?}", err),
+    //     }
+    // }
 
     #[test]
     fn from_unknown_io_error() {
@@ -332,13 +332,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn is_timeout() {
-        let err = super::request(super::TimedOut);
-        assert!(err.is_timeout());
+    // #[test]
+    // fn is_timeout() {
+    //     let err = super::request(super::TimedOut);
+    //     assert!(err.is_timeout());
 
-        let io = io::Error::new(io::ErrorKind::Other, err);
-        let nested = super::request(io);
-        assert!(nested.is_timeout());
-    }
+    //     let io = io::Error::new(io::ErrorKind::Other, err);
+    //     let nested = super::request(io);
+    //     assert!(nested.is_timeout());
+    // }
 }
