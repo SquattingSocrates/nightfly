@@ -181,8 +181,6 @@
 pub use http::header;
 pub use http::Method;
 pub use http::StatusCode;
-use lunatic::process::StartProcess;
-use lunatic_impl::client::ClientProcess;
 pub use url::Url;
 
 // universal mods

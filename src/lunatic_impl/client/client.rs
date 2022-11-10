@@ -42,19 +42,6 @@ use crate::Identity;
 use crate::{Body, ClientBuilder};
 use crate::{IntoUrl, Method, Url};
 
-/// An asynchronous `Client` to make Requests with.
-///
-/// The Client has various configuration values to tweak, but the defaults
-/// are set to what is usually the most commonly desired value. To configure a
-/// `Client`, use `Client::builder()`.
-///
-/// The `Client` holds a connection pool internally, so it is advised that
-/// you create one and **reuse** it.
-///
-/// You do **not** have to wrap the `Client` in an [`Rc`] or [`Arc`] to **reuse** it,
-/// because it already uses an [`Arc`] internally.
-///
-/// [`Rc`]: std::rc::Rc
 #[derive(Clone)]
 pub struct InnerClient {
     pub(crate) accepts: Accepts,
@@ -105,87 +92,12 @@ pub fn request_to_vec(
     request_buffer
 }
 
-pub trait ClientProcess {
-    /// Creates a `ClientBuilder` to configure a `Client`.
-    ///
-    /// This is the same as `ClientBuilder::new()`.
-    fn builder() -> ClientBuilder;
-
-    /// Convenience method to make a `GET` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn get<U>(&self, url: U) -> RequestBuilder
-    where
-        U: IntoUrl;
-
-    /// Convenience method to make a `POST` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn post<U: IntoUrl>(&self, url: U) -> RequestBuilder;
-
-    /// Convenience method to make a `PUT` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder;
-
-    /// Convenience method to make a `PATCH` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn patch<U: IntoUrl>(&self, url: U) -> RequestBuilder;
-
-    /// Convenience method to make a `DELETE` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn delete<U: IntoUrl>(&self, url: U) -> RequestBuilder;
-
-    /// Convenience method to make a `HEAD` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn head<U: IntoUrl>(&self, url: U) -> RequestBuilder;
-
-    /// Start building a `Request` with the `Method` and `Url`.
-    ///
-    /// Returns a `RequestBuilder`, which will allow setting headers and
-    /// the request body before sending.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    fn new_request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder;
-
-    /// Executes a `Request`.
-    ///
-    /// A `Request` can be built manually with `Request::new()` or obtained
-    /// from a RequestBuilder with `RequestBuilder::build()`.
-    ///
-    /// You should prefer to use the `RequestBuilder` and
-    /// `RequestBuilder::send()`.
-    ///
-    /// # Errors
-    ///
-    /// This method fails if there was an error while sending request,
-    /// redirect loop was detected or redirect limit was exhausted.
-    fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error>;
-}
-
 impl AbstractProcess for InnerClient {
     type Arg = ClientBuilder;
     type State = Self;
 
     fn init(_: ProcessRef<Self>, builder: ClientBuilder) -> Self {
-        builder.build().unwrap()
+        builder.build_inner().unwrap()
     }
 
     fn terminate(_state: Self::State) {
@@ -214,51 +126,26 @@ impl RequestHandler<ExecuteRequest> for InnerClient {
     }
 }
 
-impl ClientProcess for ProcessRef<InnerClient> {
-    fn get<U>(&self, url: U) -> RequestBuilder
-    where
-        U: IntoUrl,
-    {
-        self.new_request(Method::GET, url)
-    }
+/// An http `Client` to make Requests with.
+///
+/// The Client is a wrapper for a process so
+/// The Client has various configuration values to tweak, but the defaults
+/// are set to what is usually the most commonly desired value. To configure a
+/// `Client`, use `Client::builder()`.
+///
+/// The `Client` holds a connection pool internally, so it is advised that
+/// you create one and **reuse** it.
+///
+/// You do **not** have to wrap the `Client` in an [`Rc`] or [`Arc`] to **reuse** it,
+/// because it already wraps a ProcessRef and that ensures that any incoming messages
+/// will be processed in order, even if called at the same time from different processes.
+///
+/// Of course, as any usual ProcessRef, the Client struct is cloneable and serialisable
+/// so it's easy to pass around between processes
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Client(pub ProcessRef<InnerClient>);
 
-    fn post<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.new_request(Method::POST, url)
-    }
-
-    fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.new_request(Method::PUT, url)
-    }
-
-    fn patch<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.new_request(Method::PATCH, url)
-    }
-
-    fn delete<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.new_request(Method::DELETE, url)
-    }
-
-    fn head<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.new_request(Method::HEAD, url)
-    }
-
-    fn new_request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-        let req = url.into_url().map(move |url| Request::new(method, url));
-        RequestBuilder::new(self.clone(), req)
-    }
-
-    fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
-        let inner: InnerRequest = request.try_into()?;
-        let res = self.request(ExecuteRequest(inner))?;
-        res.try_into()
-    }
-
-    fn builder() -> ClientBuilder {
-        ClientBuilder::new()
-    }
-}
-
-impl InnerClient {
+impl Client {
     /// Constructs a new `Client`.
     ///
     /// # Panics
@@ -268,11 +155,109 @@ impl InnerClient {
     ///
     /// Use `Client::builder()` if you wish to handle the failure as an `Error`
     /// instead of panicking.
-    pub fn new() -> ProcessRef<InnerClient> {
+    pub fn new() -> Client {
         let builder = ClientBuilder::new();
-        InnerClient::start_link(builder, None)
+        let proc = InnerClient::start_link(builder, None);
+        Client(proc)
     }
 
+    /// Convenience method to make a `GET` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn get<U>(&self, url: U) -> RequestBuilder
+    where
+        U: IntoUrl,
+    {
+        self.request(Method::GET, url)
+    }
+
+    /// Convenience method to make a `POST` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn post<U: IntoUrl>(&self, url: U) -> RequestBuilder {
+        self.request(Method::POST, url)
+    }
+
+    /// Convenience method to make a `PUT` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder {
+        self.request(Method::PUT, url)
+    }
+
+    /// Convenience method to make a `PATCH` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn patch<U: IntoUrl>(&self, url: U) -> RequestBuilder {
+        self.request(Method::PATCH, url)
+    }
+
+    /// Convenience method to make a `DELETE` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn delete<U: IntoUrl>(&self, url: U) -> RequestBuilder {
+        self.request(Method::DELETE, url)
+    }
+
+    /// Convenience method to make a `HEAD` request to a URL.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn head<U: IntoUrl>(&self, url: U) -> RequestBuilder {
+        self.request(Method::HEAD, url)
+    }
+
+    /// Start building a `Request` with the `Method` and `Url`.
+    ///
+    /// Returns a `RequestBuilder`, which will allow setting headers and
+    /// the request body before sending.
+    ///
+    /// # Errors
+    ///
+    /// This method fails whenever the supplied `Url` cannot be parsed.
+    pub fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
+        let req = url.into_url().map(move |url| Request::new(method, url));
+        RequestBuilder::new(self.clone(), req)
+    }
+
+    /// Executes a `Request`.
+    ///
+    /// A `Request` can be built manually with `Request::new()` or obtained
+    /// from a RequestBuilder with `RequestBuilder::build()`.
+    ///
+    /// You should prefer to use the `RequestBuilder` and
+    /// `RequestBuilder::send()`.
+    ///
+    /// # Errors
+    ///
+    /// This method fails if there was an error while sending request,
+    /// redirect loop was detected or redirect limit was exhausted.
+    pub fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
+        let inner: InnerRequest = request.try_into()?;
+        let res = self.0.request(ExecuteRequest(inner))?;
+        res.try_into()
+    }
+
+    /// Creates a `ClientBuilder` to configure a `Client`.
+    ///
+    /// This is the same as `ClientBuilder::new()`.
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::new()
+    }
+}
+
+impl InnerClient {
     // pub(crate) fn execute(&mut self, request: InnerRequest) -> Result<HttpResponse, crate::Error> {
     //     self.execute_request(request, vec![])
     // }

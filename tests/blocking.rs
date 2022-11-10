@@ -288,6 +288,7 @@ fn test_appended_headers_not_overwritten() {
         .unwrap();
 
     assert_eq!(res.url().as_str(), &url);
+    println!("GOT RES {:?}", res);
     assert_eq!(res.status(), nightfly::StatusCode::OK);
 
     // make sure this also works with default headers

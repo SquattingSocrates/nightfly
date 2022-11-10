@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "json")]
 use serde_json;
 
-use super::client::{ClientProcess, InnerClient};
+use super::client::InnerClient;
 #[cfg(feature = "multipart")]
 use super::multipart;
 use super::response::HttpResponse;
@@ -28,7 +28,7 @@ use crate::into_url::try_uri;
 #[cfg(feature = "cookies")]
 use crate::lunatic_impl::client::add_cookie_header;
 use crate::redirect::remove_sensitive_headers;
-use crate::{error, redirect, Body, Method, Url, Version};
+use crate::{error, redirect, Body, Client, Method, Url, Version};
 use http::{request::Parts, Request as HttpRequest};
 
 /// A request which can be executed with `Client::execute()`.
@@ -58,7 +58,7 @@ pub(crate) struct InnerRequest {
 #[must_use = "RequestBuilder does nothing until you 'send' it"]
 #[derive(Clone)]
 pub struct RequestBuilder {
-    client: ProcessRef<InnerClient>,
+    client: Client,
     request: crate::Result<Request>,
 }
 
@@ -221,10 +221,7 @@ impl Request {
 }
 
 impl RequestBuilder {
-    pub(super) fn new(
-        client: ProcessRef<InnerClient>,
-        request: crate::Result<Request>,
-    ) -> RequestBuilder {
+    pub(super) fn new(client: Client, request: crate::Result<Request>) -> RequestBuilder {
         let mut builder = RequestBuilder { client, request };
 
         let auth = builder
@@ -896,15 +893,16 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lunatic_impl::client::ClientProcess;
+    use crate::Client;
 
     use super::InnerClient;
+    use http::Method;
     use serde::Serialize;
     use std::collections::BTreeMap;
 
     #[lunatic::test]
     fn add_query_append() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -915,9 +913,9 @@ mod tests {
         assert_eq!(req.url().query(), Some("foo=bar&qux=3"));
     }
 
-    #[test]
+    #[lunatic::test]
     fn add_query_append_same() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -927,7 +925,7 @@ mod tests {
         assert_eq!(req.url().query(), Some("foo=a&foo=b"));
     }
 
-    #[test]
+    #[lunatic::test]
     fn add_query_struct() {
         #[derive(Serialize)]
         struct Params {
@@ -935,7 +933,7 @@ mod tests {
             qux: i32,
         }
 
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -950,13 +948,13 @@ mod tests {
         assert_eq!(req.url().query(), Some("foo=bar&qux=3"));
     }
 
-    #[test]
+    #[lunatic::test]
     fn add_query_map() {
         let mut params = BTreeMap::new();
         params.insert("foo", "bar");
         params.insert("qux", "three");
 
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -966,7 +964,7 @@ mod tests {
         assert_eq!(req.url().query(), Some("foo=bar&qux=three"));
     }
 
-    #[test]
+    #[lunatic::test]
     fn test_replace_headers() {
         use http::HeaderMap;
 
@@ -974,7 +972,7 @@ mod tests {
         headers.insert("foo", "bar".parse().unwrap());
         headers.append("foo", "baz".parse().unwrap());
 
-        let client = InnerClient::new();
+        let client = Client::new();
         let req = client
             .get("https://hyper.rs")
             .header("im-a", "keeper")
@@ -991,9 +989,9 @@ mod tests {
         assert_eq!(foo[1], "baz");
     }
 
-    #[test]
+    #[lunatic::test]
     fn normalize_empty_query() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://google.com/";
         let empty_query: &[(&str, &str)] = &[];
 
@@ -1007,40 +1005,32 @@ mod tests {
         assert_eq!(req.url().as_str(), "https://google.com/");
     }
 
-    // #[test]
-    // fn try_clone_reusable() {
-    //     let client = Client::new();
-    //     let builder = client
-    //         .post("http://httpbin.org/post")
-    //         .header("foo", "bar")
-    //         .text("from a &str!");
-    //     let req = builder
-    //         .try_clone()
-    //         .expect("clone successful")
-    //         .build()
-    //         .expect("request is valid");
-    //     assert_eq!(req.url().as_str(), "http://httpbin.org/post");
-    //     assert_eq!(req.method(), Method::POST);
-    //     assert_eq!(req.headers()["foo"], "bar");
-    // }
+    #[lunatic::test]
+    fn try_clone_reusable() {
+        let client = Client::new();
+        let builder = client
+            .post("http://httpbin.org/post")
+            .header("foo", "bar")
+            .text("from a &str!");
+        let req = builder.clone().build().expect("request is valid");
+        assert_eq!(req.url().as_str(), "http://httpbin.org/post");
+        assert_eq!(req.method(), Method::POST);
+        assert_eq!(req.headers()["foo"], "bar");
+    }
 
-    // #[test]
-    // fn try_clone_no_body() {
-    //     let client = Client::new();
-    //     let builder = client.get("http://httpbin.org/get");
-    //     let req = builder
-    //         .try_clone()
-    //         .expect("clone successful")
-    //         .build()
-    //         .expect("request is valid");
-    //     assert_eq!(req.url().as_str(), "http://httpbin.org/get");
-    //     assert_eq!(req.method(), Method::GET);
-    //     assert!(req.body().is_none());
-    // }
+    #[lunatic::test]
+    fn try_clone_no_body() {
+        let client = Client::new();
+        let builder = client.get("http://httpbin.org/get");
+        let req = builder.clone().build().expect("request is valid");
+        assert_eq!(req.url().as_str(), "http://httpbin.org/get");
+        assert_eq!(req.method(), Method::GET);
+        assert!(req.body().is_none());
+    }
 
-    #[test]
+    #[lunatic::test]
     fn convert_url_authority_into_basic_auth() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://Aladdin:open sesame@localhost/";
 
         let req = client.get(some_url).build().expect("request build");
@@ -1052,9 +1042,9 @@ mod tests {
         );
     }
 
-    #[test]
+    #[lunatic::test]
     fn test_basic_auth_sensitive_header() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://localhost/";
 
         let req = client
@@ -1071,9 +1061,9 @@ mod tests {
         assert!(req.headers()["authorization"].is_sensitive());
     }
 
-    #[test]
+    #[lunatic::test]
     fn test_bearer_auth_sensitive_header() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://localhost/";
 
         let req = client
@@ -1087,9 +1077,9 @@ mod tests {
         assert!(req.headers()["authorization"].is_sensitive());
     }
 
-    #[test]
+    #[lunatic::test]
     fn test_explicit_sensitive_header() {
-        let client = InnerClient::new();
+        let client = Client::new();
         let some_url = "https://localhost/";
 
         let mut header = http::HeaderValue::from_static("in plain sight");

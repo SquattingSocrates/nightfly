@@ -1,5 +1,5 @@
 pub use self::body::Body;
-pub use self::client::{ClientBuilder, InnerClient};
+pub use self::client::{Client, ClientBuilder, InnerClient};
 pub use self::request::{Request, RequestBuilder};
 pub use self::response::{HttpResponse, SerializableResponse};
 // pub use self::upgrade::Upgraded;

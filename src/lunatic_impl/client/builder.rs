@@ -12,6 +12,7 @@ use http::{
     header::{HeaderName, ACCEPT, USER_AGENT},
     HeaderMap, HeaderValue,
 };
+use lunatic::process::StartProcess;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
@@ -21,6 +22,8 @@ use crate::{
     lunatic_impl::{decoder::Accepts, request::header_map_from_hashmap},
     redirect, Client,
 };
+
+use super::InnerClient;
 
 /// A `ClientBuilder` can be used to create a `Client` with custom configuration.
 #[must_use]
@@ -256,9 +259,9 @@ impl ClientBuilder {
     /// This method fails if a TLS backend cannot be initialized, or the resolver
     /// cannot load the system configuration.
     pub fn build(self) -> crate::Result<Client> {
-        let config = self.config;
+        // let config = self.config;
 
-        if let Some(err) = config.error {
+        if let Some(err) = self.config.error {
             return Err(err);
         }
 
@@ -317,7 +320,18 @@ impl ClientBuilder {
 
         // let proxies_maybe_http_auth = proxies.iter().any(|p| p.maybe_has_http_auth());
 
-        Ok(Client {
+        let proc = InnerClient::start_link(self, None);
+        Ok(Client(proc))
+    }
+
+    pub(crate) fn build_inner(self) -> Result<InnerClient, crate::Error> {
+        let config = self.config;
+
+        if let Some(err) = config.error {
+            return Err(err);
+        }
+
+        Ok(InnerClient {
             accepts: config.accepts,
             #[cfg(feature = "cookies")]
             cookie_store: config.cookie_store,
