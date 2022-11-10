@@ -1,21 +1,24 @@
-use std::borrow::Cow;
 use std::convert::TryFrom;
 use std::fmt;
 use std::net::SocketAddr;
+use std::{borrow::Cow, collections::HashMap};
 
 use bytes::Bytes;
 use encoding_rs::{Encoding, UTF_8};
-use http::{HeaderMap, HeaderValue, StatusCode, Version};
+use http::{HeaderMap, HeaderValue, StatusCode};
 use mime::Mime;
-use serde::de::DeserializeOwned;
 #[cfg(feature = "json")]
 use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 #[cfg(feature = "json")]
 use serde_json;
 use url::Url;
 
 #[cfg(feature = "cookies")]
 use crate::cookie;
+use crate::Version;
+
+use super::request::header_map_from_hashmap;
 
 // /// Extra information about the transport when an HttpConnector is used.
 // #[derive(Clone, Debug)]
@@ -25,6 +28,38 @@ use crate::cookie;
 // }
 
 /// A Response to a submitted `Request`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SerializableResponse {
+    /// body of response
+    pub body: Vec<u8>,
+    /// The response's status as u16
+    pub status: u16,
+
+    /// The response's version
+    pub version: Version,
+
+    /// The response's headers as hashmap from Headermap
+    pub headers: HashMap<String, String>,
+
+    pub(super) url: Url,
+    // pub info: HttpInfo,
+}
+
+impl TryFrom<SerializableResponse> for HttpResponse {
+    type Error = crate::Error;
+
+    fn try_from(res: SerializableResponse) -> Result<Self, Self::Error> {
+        Ok(HttpResponse {
+            body: res.body,
+            status: StatusCode::from_u16(res.status).unwrap(),
+            version: res.version,
+            headers: header_map_from_hashmap(res.headers),
+            url: res.url,
+        })
+    }
+}
+
+/// Response of an http request
 pub struct HttpResponse {
     /// body of response
     pub body: Vec<u8>,

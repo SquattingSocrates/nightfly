@@ -1,20 +1,23 @@
-use std::convert::TryFrom;
 use std::fmt;
 use std::io::Read;
+use std::{convert::TryFrom, str::FromStr};
 
 use flate2::read::{GzDecoder, ZlibDecoder};
 
 use http::{
     header::{CONTENT_ENCODING, CONTENT_LENGTH, TRANSFER_ENCODING},
-    HeaderMap,
+    HeaderMap, Method,
 };
 
 use httparse::{Status, EMPTY_HEADER};
+use serde::{Deserialize, Serialize};
 
 use super::http_stream::HttpStream;
-use crate::{Client, HttpResponse, Request};
+use super::request::InnerRequest;
+use super::InnerClient;
+use crate::{HttpResponse, Request};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct Accepts {
     pub(super) gzip: bool,
     pub(super) brotli: bool,
@@ -109,7 +112,8 @@ impl Decoder {
             return HttpResponse {
                 headers: reader.res.headers().to_owned(),
                 status: reader.res.status().to_owned(),
-                version: reader.res.version().to_owned(),
+                // transform type into http::Version type
+                version: reader.res.version().into(),
                 body,
                 url: reader.req.url.clone(),
             };
@@ -142,7 +146,7 @@ impl Decoder {
         HttpResponse {
             headers: self.reader.res.headers().to_owned(),
             status: self.reader.res.status().to_owned(),
-            version: self.reader.res.version().to_owned(),
+            version: self.reader.res.version().into(),
             body: buf,
             url: self.reader.req.url.clone(),
         }
@@ -225,8 +229,8 @@ pub(crate) enum ParseResponseError {
 pub(crate) fn parse_response(
     mut response_buffer: Vec<u8>,
     mut stream: HttpStream,
-    req: Request,
-    client: &mut Client,
+    req: InnerRequest,
+    client: &mut InnerClient,
 ) -> ResponseResult {
     let mut buffer = [0_u8; REQUEST_BUFFER_SIZE];
     let mut headers = [EMPTY_HEADER; MAX_HEADERS];
@@ -318,7 +322,7 @@ pub struct HttpBodyReader {
     pub(crate) res: http::Response<Vec<u8>>,
     pub(crate) response_buffer: Vec<u8>,
     pub(crate) offset: usize,
-    pub(crate) req: Request,
+    pub(crate) req: InnerRequest,
     // pub(crate) client: &'a mut Client,
 }
 
@@ -334,7 +338,7 @@ impl HttpBodyReader {
     }
 
     pub fn no_content_length_required(&self) -> bool {
-        let method = &self.req.method;
+        let method = Method::from_str(&self.req.method).unwrap();
         let status = self.res.status();
         let status_num = status.as_u16();
         method == http::Method::HEAD

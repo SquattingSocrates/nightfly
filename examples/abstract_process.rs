@@ -1,6 +1,8 @@
 #![deny(warnings)]
 extern crate nightfly;
 
+use std::marker::PhantomData;
+
 use lunatic::{
     abstract_process,
     process::{ProcessRef, StartProcess},
@@ -8,7 +10,7 @@ use lunatic::{
     Mailbox, Tag,
 };
 use nightfly::Client;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 struct UuidResponse {

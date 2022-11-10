@@ -1,81 +1,46 @@
-#[cfg(any(feature = "native-tls", feature = "__rustls",))]
-use std::any::Any;
-use std::io::Write;
-use std::net::IpAddr;
-use std::sync::Arc;
-use std::time::Duration;
-use std::{collections::HashMap, convert::TryInto, net::SocketAddr};
-use std::{fmt, str};
-
-use http::header::{
-    self, Entry, HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, PROXY_AUTHORIZATION, RANGE,
-    USER_AGENT,
+use core::fmt;
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+    iter::FromIterator,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+    time::Duration,
 };
-use http::uri::Scheme;
-use http::{Uri, Version};
 
-use super::decoder::{parse_response, Accepts};
-use super::http_stream::HttpStream;
-use super::request::{PendingRequest, Request, RequestBuilder};
-use super::response::HttpResponse;
-use super::Body;
+use http::{
+    header::{HeaderName, ACCEPT, USER_AGENT},
+    HeaderMap, HeaderValue,
+};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
 #[cfg(feature = "cookies")]
-use crate::cookie;
-use crate::error;
-use crate::into_url::expect_uri;
-use crate::redirect::{self};
-#[cfg(feature = "__tls")]
-use crate::tls::{self, TlsBackend};
-#[cfg(feature = "__tls")]
-use crate::Certificate;
-#[cfg(any(feature = "native-tls", feature = "__rustls"))]
-use crate::Identity;
-use crate::{IntoUrl, Method, Url};
+use crate::cookie::CookieJar;
 
-/// An asynchronous `Client` to make Requests with.
-///
-/// The Client has various configuration values to tweak, but the defaults
-/// are set to what is usually the most commonly desired value. To configure a
-/// `Client`, use `Client::builder()`.
-///
-/// The `Client` holds a connection pool internally, so it is advised that
-/// you create one and **reuse** it.
-///
-/// You do **not** have to wrap the `Client` in an [`Rc`] or [`Arc`] to **reuse** it,
-/// because it already uses an [`Arc`] internally.
-///
-/// [`Rc`]: std::rc::Rc
-#[derive(Clone)]
-pub struct Client {
-    accepts: Accepts,
-    #[cfg(feature = "cookies")]
-    pub(crate) cookie_store: Option<Arc<dyn cookie::CookieStore>>,
-    pub(crate) headers: HeaderMap,
-    pub(crate) redirect_policy: redirect::Policy,
-    pub(crate) referer: bool,
-    pub(crate) request_timeout: Option<Duration>,
-    // pub(crate) proxies: Arc<Vec<Proxy>>,
-    pub(crate) proxies_maybe_http_auth: bool,
-    pub(crate) https_only: bool,
-    pub(crate) stream: Option<HttpStream>,
-}
+use crate::{
+    lunatic_impl::{decoder::Accepts, request::header_map_from_hashmap},
+    redirect, Client,
+};
 
 /// A `ClientBuilder` can be used to create a `Client` with custom configuration.
 #[must_use]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ClientBuilder {
-    config: Config,
+    pub(crate) config: Config,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 enum HttpVersionPref {
     Http1,
     Http2,
     All,
 }
 
-struct Config {
+#[derive(Serialize, Deserialize, Clone)]
+pub(crate) struct Config {
     // NOTE: When adding a new field, update `fmt::Debug for ClientBuilder`
-    accepts: Accepts,
-    headers: HeaderMap,
+    pub(crate) accepts: Accepts,
+    headers: HashMap<String, String>,
     #[cfg(feature = "native-tls")]
     hostname_verification: bool,
     #[cfg(feature = "__tls")]
@@ -100,8 +65,6 @@ struct Config {
     min_tls_version: Option<tls::Version>,
     #[cfg(feature = "__tls")]
     max_tls_version: Option<tls::Version>,
-    #[cfg(feature = "__tls")]
-    tls: TlsBackend,
     http_version_pref: HttpVersionPref,
     http09_responses: bool,
     http1_title_case_headers: bool,
@@ -116,11 +79,104 @@ struct Config {
     local_address: Option<IpAddr>,
     nodelay: bool,
     #[cfg(feature = "cookies")]
-    cookie_store: Option<Arc<dyn cookie::CookieStore>>,
+    cookie_store: Option<CookieJar>,
     // trust_dns: bool,
     error: Option<crate::Error>,
     https_only: bool,
     dns_overrides: HashMap<String, Vec<SocketAddr>>,
+}
+
+impl Config {
+    pub(crate) fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
+        // Instead of deriving Debug, only print fields when their output
+        // would provide relevant or interesting data.
+
+        #[cfg(feature = "cookies")]
+        {
+            if let Some(_) = self.cookie_store {
+                f.field("cookie_store", &true);
+            }
+        }
+
+        f.field("accepts", &self.accepts);
+
+        // if !self.proxies.is_empty() {
+        //     f.field("proxies", &self.proxies);
+        // }
+
+        if !self.redirect_policy.is_default() {
+            f.field("redirect_policy", &self.redirect_policy);
+        }
+
+        if self.referer {
+            f.field("referer", &true);
+        }
+
+        f.field("default_headers", &self.headers);
+
+        if self.http1_title_case_headers {
+            f.field("http1_title_case_headers", &true);
+        }
+
+        if self.http1_allow_obsolete_multiline_headers_in_responses {
+            f.field("http1_allow_obsolete_multiline_headers_in_responses", &true);
+        }
+
+        if matches!(self.http_version_pref, HttpVersionPref::Http1) {
+            f.field("http1_only", &true);
+        }
+
+        if matches!(self.http_version_pref, HttpVersionPref::Http2) {
+            f.field("http2_prior_knowledge", &true);
+        }
+
+        if let Some(ref d) = self.connect_timeout {
+            f.field("connect_timeout", d);
+        }
+
+        if let Some(ref d) = self.timeout {
+            f.field("timeout", d);
+        }
+
+        if let Some(ref v) = self.local_address {
+            f.field("local_address", v);
+        }
+
+        if self.nodelay {
+            f.field("tcp_nodelay", &true);
+        }
+
+        #[cfg(feature = "native-tls")]
+        {
+            if !self.hostname_verification {
+                f.field("danger_accept_invalid_hostnames", &true);
+            }
+        }
+
+        #[cfg(feature = "__tls")]
+        {
+            if !self.certs_verification {
+                f.field("danger_accept_invalid_certs", &true);
+            }
+
+            if let Some(ref min_tls_version) = self.min_tls_version {
+                f.field("min_tls_version", min_tls_version);
+            }
+
+            if let Some(ref max_tls_version) = self.max_tls_version {
+                f.field("max_tls_version", max_tls_version);
+            }
+        }
+
+        #[cfg(all(feature = "native-tls-crate", feature = "__rustls"))]
+        {
+            f.field("tls_backend", &self.tls);
+        }
+
+        if !self.dns_overrides.is_empty() {
+            f.field("dns_overrides", &self.dns_overrides);
+        }
+    }
 }
 
 impl Default for ClientBuilder {
@@ -134,8 +190,10 @@ impl ClientBuilder {
     ///
     /// This is the same as `Client::builder()`.
     pub fn new() -> ClientBuilder {
-        let mut headers: HeaderMap<HeaderValue> = HeaderMap::with_capacity(2);
-        headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+        // let mut headers: HeaderMap<HeaderValue> = HeaderMap::with_capacity(2);
+        // headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+        let mut headers = HashMap::new();
+        headers.insert(ACCEPT.to_string(), "*/*".to_string());
 
         ClientBuilder {
             config: Config {
@@ -155,7 +213,7 @@ impl ClientBuilder {
                 tcp_keepalive: None, //Some(Duration::from_secs(60)),
                 // proxies: Vec::new(),
                 // auto_sys_proxy: true,
-                redirect_policy: redirect::Policy::default(),
+                redirect_policy: crate::redirect::Policy::default(),
                 referer: true,
                 timeout: None,
                 #[cfg(feature = "__tls")]
@@ -263,7 +321,7 @@ impl ClientBuilder {
             accepts: config.accepts,
             #[cfg(feature = "cookies")]
             cookie_store: config.cookie_store,
-            headers: config.headers,
+            headers: header_map_from_hashmap(config.headers),
             redirect_policy: config.redirect_policy,
             referer: config.referer,
             request_timeout: config.timeout,
@@ -303,7 +361,9 @@ impl ClientBuilder {
     {
         match value.try_into() {
             Ok(value) => {
-                self.config.headers.insert(USER_AGENT, value);
+                self.config
+                    .headers
+                    .insert(USER_AGENT.to_string(), value.to_str().unwrap().to_string());
             }
             Err(e) => {
                 self.config.error = Some(crate::error::builder(e.into()));
@@ -357,7 +417,9 @@ impl ClientBuilder {
     /// ```
     pub fn default_headers(mut self, headers: HeaderMap) -> ClientBuilder {
         for (key, value) in headers.iter() {
-            self.config.headers.insert(key, value.clone());
+            self.config
+                .headers
+                .insert(key.to_string(), value.to_str().unwrap().to_string());
         }
         self
     }
@@ -369,14 +431,10 @@ impl ClientBuilder {
     ///
     /// By default, no cookie store is used.
     ///
-    /// # Optional
-    ///
-    /// This requires the optional `cookies` feature to be enabled.
     #[cfg(feature = "cookies")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
     pub fn cookie_store(mut self, enable: bool) -> ClientBuilder {
         if enable {
-            self.cookie_provider(Arc::new(cookie::Jar::default()))
+            self.cookie_provider(CookieJar::default())
         } else {
             self.config.cookie_store = None;
             self
@@ -390,16 +448,9 @@ impl ClientBuilder {
     ///
     /// By default, no cookie store is used.
     ///
-    /// # Optional
-    ///
-    /// This requires the optional `cookies` feature to be enabled.
     #[cfg(feature = "cookies")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
-    pub fn cookie_provider<C: cookie::CookieStore + 'static>(
-        mut self,
-        cookie_store: Arc<C>,
-    ) -> ClientBuilder {
-        self.config.cookie_store = Some(cookie_store as _);
+    pub fn cookie_provider(mut self, cookie_store: CookieJar) -> ClientBuilder {
+        self.config.cookie_store = Some(cookie_store);
         self
     }
 
@@ -416,11 +467,6 @@ impl ClientBuilder {
     ///
     /// If the `gzip` feature is turned on, the default option is enabled.
     ///
-    /// # Optional
-    ///
-    /// This requires the optional `gzip` feature to be enabled
-    #[cfg(feature = "gzip")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
     pub fn gzip(mut self, enable: bool) -> ClientBuilder {
         self.config.accepts.gzip = enable;
         self
@@ -437,13 +483,6 @@ impl ClientBuilder {
     ///   `br`, both `Content-Encoding` and `Content-Length` are removed from the
     ///   headers' set. The response body is automatically decompressed.
     ///
-    /// If the `brotli` feature is turned on, the default option is enabled.
-    ///
-    /// # Optional
-    ///
-    /// This requires the optional `brotli` feature to be enabled
-    #[cfg(feature = "brotli")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "brotli")))]
     pub fn brotli(mut self, enable: bool) -> ClientBuilder {
         self.config.accepts.brotli = enable;
         self
@@ -460,10 +499,6 @@ impl ClientBuilder {
     ///   equals to `deflate`, both values `Content-Encoding` and `Content-Length` are removed from the
     ///   headers' set. The response body is automatically decompressed.
     ///
-    /// If the `deflate` feature is turned on, the default option is enabled.
-    ///
-    /// # Optional
-    ///
     pub fn deflate(mut self, enable: bool) -> ClientBuilder {
         self.config.accepts.deflate = enable;
         self
@@ -475,15 +510,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use gzip decompression
     /// even if another dependency were to enable the optional `gzip` feature.
     pub fn no_gzip(self) -> ClientBuilder {
-        #[cfg(feature = "gzip")]
-        {
-            self.gzip(false)
-        }
-
-        #[cfg(not(feature = "gzip"))]
-        {
-            self
-        }
+        self.gzip(false)
     }
 
     /// Disable auto response body brotli decompression.
@@ -492,15 +519,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use brotli decompression
     /// even if another dependency were to enable the optional `brotli` feature.
     pub fn no_brotli(self) -> ClientBuilder {
-        #[cfg(feature = "brotli")]
-        {
-            self.brotli(false)
-        }
-
-        #[cfg(not(feature = "brotli"))]
-        {
-            self
-        }
+        self.brotli(false)
     }
 
     /// Disable auto response body deflate decompression.
@@ -509,9 +528,7 @@ impl ClientBuilder {
     /// This can be used to ensure a `Client` doesn't use deflate decompression
     /// even if another dependency were to enable the optional `deflate` feature.
     pub fn no_deflate(self) -> ClientBuilder {
-        {
-            self.deflate(false)
-        }
+        self.deflate(false)
     }
 
     // Redirect options
@@ -1070,490 +1087,5 @@ impl ClientBuilder {
             .dns_overrides
             .insert(domain.to_string(), addrs.to_vec());
         self
-    }
-}
-
-impl Default for Client {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// encode request as http text
-pub fn request_to_vec(
-    method: Method,
-    uri: Url,
-    mut headers: HeaderMap,
-    body: Option<Body>,
-    version: Version,
-) -> Vec<u8> {
-    let mut request_buffer: Vec<u8> = Vec::new();
-    if let Some(body) = &body {
-        headers.append(header::CONTENT_LENGTH, HeaderValue::from(body.len()));
-    }
-
-    // writing status line
-    let path = if let Some(query) = uri.query() {
-        format!("{}?{}", uri.path(), query)
-    } else {
-        uri.path().to_string()
-    };
-    request_buffer.extend(format!("{} {} {:?}\r\n", method, path, version,).as_bytes());
-    // writing headers
-    for (key, value) in headers.iter() {
-        if let Ok(value) = String::from_utf8(value.as_ref().to_vec()) {
-            request_buffer.extend(format!("{}: {}\r\n", key, value).as_bytes());
-        }
-    }
-    // separator between header and data
-    request_buffer.extend("\r\n".as_bytes());
-    if let Some(body) = body {
-        request_buffer.extend(body.inner());
-    }
-
-    request_buffer
-}
-
-impl Client {
-    /// Constructs a new `Client`.
-    ///
-    /// # Panics
-    ///
-    /// This method panics if a TLS backend cannot be initialized, or the resolver
-    /// cannot load the system configuration.
-    ///
-    /// Use `Client::builder()` if you wish to handle the failure as an `Error`
-    /// instead of panicking.
-    pub fn new() -> Client {
-        ClientBuilder::new().build().expect("Client::new()")
-    }
-
-    /// Creates a `ClientBuilder` to configure a `Client`.
-    ///
-    /// This is the same as `ClientBuilder::new()`.
-    pub fn builder() -> ClientBuilder {
-        ClientBuilder::new()
-    }
-
-    /// Convenience method to make a `GET` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn get<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::GET, url)
-    }
-
-    /// Convenience method to make a `POST` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn post<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::POST, url)
-    }
-
-    /// Convenience method to make a `PUT` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn put<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::PUT, url)
-    }
-
-    /// Convenience method to make a `PATCH` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn patch<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::PATCH, url)
-    }
-
-    /// Convenience method to make a `DELETE` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn delete<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::DELETE, url)
-    }
-
-    /// Convenience method to make a `HEAD` request to a URL.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn head<U: IntoUrl>(&self, url: U) -> RequestBuilder {
-        self.request(Method::HEAD, url)
-    }
-
-    /// Start building a `Request` with the `Method` and `Url`.
-    ///
-    /// Returns a `RequestBuilder`, which will allow setting headers and
-    /// the request body before sending.
-    ///
-    /// # Errors
-    ///
-    /// This method fails whenever the supplied `Url` cannot be parsed.
-    pub fn request<U: IntoUrl>(&self, method: Method, url: U) -> RequestBuilder {
-        let req = url.into_url().map(move |url| Request::new(method, url));
-        RequestBuilder::new(self.clone(), req)
-    }
-
-    /// Executes a `Request`.
-    ///
-    /// A `Request` can be built manually with `Request::new()` or obtained
-    /// from a RequestBuilder with `RequestBuilder::build()`.
-    ///
-    /// You should prefer to use the `RequestBuilder` and
-    /// `RequestBuilder::send()`.
-    ///
-    /// # Errors
-    ///
-    /// This method fails if there was an error while sending request,
-    /// redirect loop was detected or redirect limit was exhausted.
-    pub fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
-        self.execute_request(request, vec![])
-    }
-
-    pub(crate) fn accepts(&self) -> Accepts {
-        self.accepts.clone()
-    }
-
-    /// ensures connection
-    pub fn ensure_connection(&mut self, url: Url) -> crate::Result<HttpStream> {
-        if let Some(stream) = &self.stream {
-            return Ok(stream.clone());
-        }
-        HttpStream::connect(url)
-    }
-
-    fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
-        // Instead of deriving Debug, only print fields when their output
-        // would provide relevant or interesting data.
-
-        #[cfg(feature = "cookies")]
-        {
-            if let Some(_) = self.cookie_store {
-                f.field("cookie_store", &true);
-            }
-        }
-
-        f.field("accepts", &self.accepts);
-
-        // if !self.proxies.is_empty() {
-        //     f.field("proxies", &self.proxies);
-        // }
-
-        // if !self.redirect_policy.is_default() {
-        //     f.field("redirect_policy", &self.redirect_policy);
-        // }
-
-        if self.referer {
-            f.field("referer", &true);
-        }
-
-        f.field("default_headers", &self.headers);
-
-        if let Some(ref d) = self.request_timeout {
-            f.field("timeout", d);
-        }
-    }
-
-    pub(super) fn execute_request(
-        &mut self,
-        req: Request,
-        urls: Vec<Url>,
-    ) -> Result<HttpResponse, crate::Error> {
-        let (method, url, mut headers, body, _timeout, version) = req.clone().pieces();
-        if url.scheme() != "http" && url.scheme() != "https" {
-            return Err(error::url_bad_scheme(url));
-        }
-
-        // check if we're in https_only mode and check the scheme of the current URL
-        if self.https_only && url.scheme() != "https" {
-            return Err(error::url_bad_scheme(url));
-        }
-
-        if let Some(host) = url.host() {
-            headers.append("Host", HeaderValue::from_str(&host.to_string()).unwrap());
-        }
-
-        // insert default headers in the request headers
-        // without overwriting already appended headers.
-        for (key, value) in &self.headers {
-            println!("WRITING HEADER from client {:?}", headers.entry(key));
-            if let Entry::Vacant(entry) = headers.entry(key) {
-                entry.insert(value.clone());
-            }
-        }
-
-        // Add cookies from the cookie store.
-        #[cfg(feature = "cookies")]
-        {
-            if let Some(cookie_store) = self.cookie_store.as_ref() {
-                if headers.get(crate::header::COOKIE).is_none() {
-                    add_cookie_header(&mut headers, &**cookie_store, &url);
-                }
-            }
-        }
-
-        let accept_encoding = self.accepts.as_str();
-
-        if let Some(accept_encoding) = accept_encoding {
-            if !headers.contains_key(ACCEPT_ENCODING) && !headers.contains_key(RANGE) {
-                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
-            }
-        }
-
-        let uri = expect_uri(&url);
-
-        self.proxy_auth(&uri, &mut headers);
-
-        let mut encoded = request_to_vec(method, url.clone(), headers, body, version);
-
-        let mut stream = self.ensure_connection(url.clone())?;
-        // if let Some(timeout) = self.request_timeout {
-        //     stream.set
-        // }
-
-        stream.write_all(&mut encoded).unwrap();
-
-        let response_buffer = Vec::new();
-
-        match parse_response(response_buffer, stream.clone(), req.clone(), self) {
-            Ok(res) => PendingRequest::new(res, self, req, urls).resolve(),
-            Err(_e) => unimplemented!(),
-        }
-    }
-
-    fn proxy_auth(&self, dst: &Uri, headers: &mut HeaderMap) {
-        if !self.proxies_maybe_http_auth {
-            return;
-        }
-
-        // Only set the header here if the destination scheme is 'http',
-        // since otherwise, the header will be included in the CONNECT tunnel
-        // request instead.
-        if dst.scheme() != Some(&Scheme::HTTP) {
-            return;
-        }
-
-        if headers.contains_key(PROXY_AUTHORIZATION) {
-            return;
-        }
-
-        // for proxy in self.proxies.iter() {
-        //     if proxy.is_match(dst) {
-        //         if let Some(header) = proxy.http_basic_auth(dst) {
-        //             headers.insert(PROXY_AUTHORIZATION, header);
-        //         }
-
-        //         break;
-        //     }
-        // }
-    }
-}
-
-impl fmt::Debug for Client {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = f.debug_struct("Client");
-        self.fmt_fields(&mut builder);
-        builder.finish()
-    }
-}
-
-impl fmt::Debug for ClientBuilder {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut builder = f.debug_struct("ClientBuilder");
-        self.config.fmt_fields(&mut builder);
-        builder.finish()
-    }
-}
-
-impl Config {
-    fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
-        // Instead of deriving Debug, only print fields when their output
-        // would provide relevant or interesting data.
-
-        #[cfg(feature = "cookies")]
-        {
-            if let Some(_) = self.cookie_store {
-                f.field("cookie_store", &true);
-            }
-        }
-
-        f.field("accepts", &self.accepts);
-
-        // if !self.proxies.is_empty() {
-        //     f.field("proxies", &self.proxies);
-        // }
-
-        if !self.redirect_policy.is_default() {
-            f.field("redirect_policy", &self.redirect_policy);
-        }
-
-        if self.referer {
-            f.field("referer", &true);
-        }
-
-        f.field("default_headers", &self.headers);
-
-        if self.http1_title_case_headers {
-            f.field("http1_title_case_headers", &true);
-        }
-
-        if self.http1_allow_obsolete_multiline_headers_in_responses {
-            f.field("http1_allow_obsolete_multiline_headers_in_responses", &true);
-        }
-
-        if matches!(self.http_version_pref, HttpVersionPref::Http1) {
-            f.field("http1_only", &true);
-        }
-
-        if matches!(self.http_version_pref, HttpVersionPref::Http2) {
-            f.field("http2_prior_knowledge", &true);
-        }
-
-        if let Some(ref d) = self.connect_timeout {
-            f.field("connect_timeout", d);
-        }
-
-        if let Some(ref d) = self.timeout {
-            f.field("timeout", d);
-        }
-
-        if let Some(ref v) = self.local_address {
-            f.field("local_address", v);
-        }
-
-        if self.nodelay {
-            f.field("tcp_nodelay", &true);
-        }
-
-        #[cfg(feature = "native-tls")]
-        {
-            if !self.hostname_verification {
-                f.field("danger_accept_invalid_hostnames", &true);
-            }
-        }
-
-        #[cfg(feature = "__tls")]
-        {
-            if !self.certs_verification {
-                f.field("danger_accept_invalid_certs", &true);
-            }
-
-            if let Some(ref min_tls_version) = self.min_tls_version {
-                f.field("min_tls_version", min_tls_version);
-            }
-
-            if let Some(ref max_tls_version) = self.max_tls_version {
-                f.field("max_tls_version", max_tls_version);
-            }
-        }
-
-        #[cfg(all(feature = "native-tls-crate", feature = "__rustls"))]
-        {
-            f.field("tls_backend", &self.tls);
-        }
-
-        if !self.dns_overrides.is_empty() {
-            f.field("dns_overrides", &self.dns_overrides);
-        }
-    }
-}
-
-// impl PendingRequest {
-//     fn in_flight(self: Pin<&mut Self>) -> Pin<&mut ResponseFuture> {
-//         self.project().in_flight
-//     }
-
-//     fn timeout(self: Pin<&mut Self>) -> Pin<&mut Option<Pin<Box<Sleep>>>> {
-//         self.project().timeout
-//     }
-
-//     fn urls(self: Pin<&mut Self>) -> &mut Vec<Url> {
-//         self.project().urls
-//     }
-
-//     fn headers(self: Pin<&mut Self>) -> &mut HeaderMap {
-//         self.project().headers
-//     }
-
-//     fn retry_error(mut self: Pin<&mut Self>, err: &(dyn std::error::Error + 'static)) -> bool {
-//         if !is_retryable_error(err) {
-//             return false;
-//         }
-
-//         trace!("can retry {:?}", err);
-
-//         let body = match self.body {
-//             Some(Some(ref body)) => Body::reusable(body.clone()),
-//             Some(None) => {
-//                 debug!("error was retryable, but body not reusable");
-//                 return false;
-//             }
-//             None => Body::empty(),
-//         };
-
-//         if self.retry_count >= 2 {
-//             trace!("retry count too high");
-//             return false;
-//         }
-//         self.retry_count += 1;
-
-//         let uri = expect_uri(&self.url);
-//         let mut req = Request::builder()
-//             .method(self.method.clone())
-//             .uri(uri)
-//             .body(body.into_stream())
-//             .expect("valid request parts");
-
-//         *req.headers_mut() = self.headers.clone();
-
-//         *self.as_mut().in_flight().get_mut() = self.client.hyper.request(req);
-
-//         true
-//     }
-// }
-
-// fn is_retryable_error(err: &(dyn std::error::Error + 'static)) -> bool {
-//     if let Some(cause) = err.source() {
-//         if let Some(err) = cause.downcast_ref::<h2::Error>() {
-//             // They sent us a graceful shutdown, try with a new connection!
-//             return err.is_go_away()
-//                 && err.is_remote()
-//                 && err.reason() == Some(h2::Reason::NO_ERROR);
-//         }
-//     }
-//     false
-// }
-
-#[cfg(feature = "cookies")]
-pub(crate) fn add_cookie_header(
-    headers: &mut HeaderMap,
-    cookie_store: &dyn cookie::CookieStore,
-    url: &Url,
-) {
-    if let Some(header) = cookie_store.cookies(url) {
-        headers.insert(crate::header::COOKIE, header);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[lunatic::test]
-    fn execute_request_rejects_invald_urls() {
-        let url_str = "hxxps://www.rust-lang.org/";
-        let url = url::Url::parse(url_str).unwrap();
-        let result = crate::get(url.clone());
-
-        assert!(result.is_err());
-        let err = result.err().unwrap();
-        assert!(err.is_builder());
-        assert_eq!(url_str, err.url().unwrap().as_str());
     }
 }

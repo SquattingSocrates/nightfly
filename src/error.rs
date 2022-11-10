@@ -1,27 +1,49 @@
+use serde::Deserialize;
+use serde::Serialize;
 use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
+use crate::HttpResponse;
+use crate::SerializableResponse;
 use crate::{StatusCode, Url};
 
 /// A `Result` alias where the `Err` case is `nightfly::Error`.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Serialize, Deserialize)]
+pub struct ResponseResult {
+    result: std::result::Result<SerializableResponse, Error>,
+}
 
 /// The Errors that may occur when processing a `Request`.
 ///
 /// Note: Errors may include the full URL used to make the `Request`. If the URL
 /// contains sensitive information (e.g. an API key as a query parameter), be
 /// sure to remove it ([`without_url`](Error::without_url))
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Error {
     inner: Box<Inner>,
 }
 
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
+#[derive(Serialize, Deserialize)]
 struct Inner {
     kind: Kind,
+    #[serde(skip)]
     source: Option<BoxError>,
     url: Option<Url>,
+}
+
+impl Clone for Inner {
+    fn clone(&self) -> Self {
+        Inner {
+            kind: self.kind.clone(),
+            source: None,
+            url: self.url.clone(),
+        }
+    }
 }
 
 impl Error {
@@ -128,7 +150,7 @@ impl Error {
     /// Returns the status code, if the error was generated from a response.
     pub fn status(&self) -> Option<StatusCode> {
         match self.inner.kind {
-            Kind::Status(code) => Some(code),
+            Kind::Status(code) => Some(StatusCode::from_u16(code).unwrap()),
             _ => None,
         }
     }
@@ -168,10 +190,11 @@ impl fmt::Display for Error {
             Kind::Redirect => f.write_str("error following redirect")?,
             // Kind::Upgrade => f.write_str("error upgrading connection")?,
             Kind::Status(ref code) => {
-                let prefix = if code.is_client_error() {
+                let status = StatusCode::from_u16(*code).unwrap();
+                let prefix = if status.is_client_error() {
                     "HTTP status client error"
                 } else {
-                    debug_assert!(code.is_server_error());
+                    debug_assert!(status.is_server_error());
                     "HTTP status server error"
                 };
                 write!(f, "{} ({})", prefix, code)?;
@@ -196,12 +219,12 @@ impl StdError for Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) enum Kind {
     Builder,
     Request,
     Redirect,
-    Status(StatusCode),
+    Status(u16),
     // Body,
     Decode,
     // Upgrade,
@@ -230,7 +253,7 @@ pub(crate) fn redirect<E: Into<BoxError>>(e: E, url: Url) -> Error {
 }
 
 pub(crate) fn status_code(url: Url, status: StatusCode) -> Error {
-    Error::new(Kind::Status(status), None::<Error>).with_url(url)
+    Error::new(Kind::Status(status.as_u16()), None::<Error>).with_url(url)
 }
 
 pub(crate) fn url_bad_scheme(url: Url) -> Error {

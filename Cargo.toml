@@ -1,16 +1,16 @@
 [package]
-authors = ["Yuriy Voshchepynets <yuriy.voshchepynets@ckreator.com>"] 
-autotests = true 
-categories = ["web-programming::http-client", "wasm"] 
-description = "higher level HTTP client library for the lunatic runtime" 
-documentation = "https://docs.rs/nightfly" 
-edition = "2018" 
-keywords = ["http", "request", "client"] 
-license = "MIT/Apache-2.0" 
-name = "nightfly" 
-readme = "README.md" 
-repository = "https://github.com/seanmonstar/nightfly" 
-version = "0.1.0" # remember to update html_root_url
+authors = ["Yuriy Voshchepynets <yuriy.voshchepynets@ckreator.com>"]
+autotests = true
+categories = ["web-programming::http-client", "wasm"]
+description = "higher level HTTP client library for the lunatic runtime"
+documentation = "https://docs.rs/nightfly"
+edition = "2018"
+keywords = ["http", "request", "client"]
+license = "MIT/Apache-2.0"
+name = "nightfly"
+readme = "README.md"
+repository = "https://github.com/SquattingSocrates/nightfly"
+version = "0.1.0"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -18,18 +18,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.playground]
 features = [
-  "cookies",
   "json",
   "multipart",
 ]
 
 [features]
 cookies = ["cookie_crate", "cookie_store", "proc-macro-hack"]
-default = ["cookies"]
+default = []
 
 multipart = ["mime_guess"]
-
-# trust-dns = ["trust-dns-resolver"]
 
 [dependencies]
 base64 = "0.13"
@@ -39,7 +36,7 @@ http = "0.2"
 http-body = "0.4.5"
 httparse = "1.7.1"
 ipnet = "2.5.0"
-lunatic = {git = "https://github.com/lunatic-solutions/lunatic-rs"}
+lunatic = {path = "../rust-lib"}
 lunatic-log = "0.2"
 mime = "0.3.16"
 percent-encoding = "2.2.0"
@@ -47,7 +44,7 @@ serde = "1.0"
 serde_urlencoded = "0.7.1"
 thiserror = "1.0"
 tower-service = "0.3"
-url = "2.2"
+url = {version = "2.2", features = ["serde"]}
 
 # Optional deps...
 
@@ -59,7 +56,7 @@ mime_guess = {version = "2.0", default-features = false, optional = true}
 brotli = {version = "3.3.4"}
 
 ## cookies
-cookie_crate = {version = "0.16", package = "cookie", optional = true}
+cookie_crate = {path = "../cookie-rs", package = "cookie", optional = true}
 cookie_store = {version = "0.16", optional = true}
 proc-macro-hack = {version = "0.5.19", optional = true}
 

@@ -180,7 +180,9 @@
 
 pub use http::header;
 pub use http::Method;
-pub use http::{StatusCode, Version};
+pub use http::StatusCode;
+use lunatic::process::StartProcess;
+use lunatic_impl::client::ClientProcess;
 pub use url::Url;
 
 // universal mods
@@ -221,7 +223,7 @@ pub use self::response::ResponseBuilderExt;
 /// - there was an error while sending request
 /// - redirect limit was exhausted
 pub fn get<T: IntoUrl>(url: T) -> crate::Result<HttpResponse> {
-    Client::builder().build()?.get(url).send()
+    Client::new().get(url).send()
 }
 
 fn _assert_impls() {
@@ -249,7 +251,9 @@ fn _assert_impls() {
 
 #[cfg(feature = "multipart")]
 pub use self::lunatic_impl::multipart;
-pub use self::lunatic_impl::{Body, Client, ClientBuilder, HttpResponse, Request, RequestBuilder};
+pub use self::lunatic_impl::{
+    Body, Client, ClientBuilder, HttpResponse, Request, RequestBuilder, SerializableResponse,
+};
 #[cfg(feature = "__tls")]
 // Re-exports, to be removed in a future release
 pub use tls::{Certificate, Identity};
@@ -261,3 +265,5 @@ pub mod redirect;
 #[cfg(feature = "__tls")]
 pub mod tls;
 mod util;
+mod version;
+pub use version::Version;

@@ -1,27 +1,35 @@
-use std::convert::TryFrom;
+use std::collections::HashMap;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::io::Write;
+use std::iter::FromIterator;
+use std::str::FromStr;
 use std::time::Duration;
 
 use base64::write::EncoderWriter as Base64Encoder;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, LOCATION, REFERER, TRANSFER_ENCODING};
 use http::StatusCode;
-use serde::Serialize;
+use lunatic::process::ProcessRef;
+use lunatic::{abstract_process, Tag};
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "json")]
 use serde_json;
 
-use super::client::Client;
+use super::client::{ClientProcess, InnerClient};
 #[cfg(feature = "multipart")]
 use super::multipart;
 use super::response::HttpResponse;
+#[cfg(feature = "cookies")]
+use crate::cookie;
 #[cfg(feature = "multipart")]
 use crate::header::CONTENT_LENGTH;
 use crate::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
 use crate::into_url::try_uri;
+#[cfg(feature = "cookies")]
 use crate::lunatic_impl::client::add_cookie_header;
 use crate::redirect::remove_sensitive_headers;
-use crate::{cookie, error, redirect, Body, Method, Url};
-use http::{request::Parts, Request as HttpRequest, Version};
+use crate::{error, redirect, Body, Method, Url, Version};
+use http::{request::Parts, Request as HttpRequest};
 
 /// A request which can be executed with `Client::execute()`.
 #[derive(Clone)]
@@ -34,13 +42,79 @@ pub struct Request {
     pub(crate) version: Version,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct InnerRequest {
+    pub(crate) method: String,
+    pub(crate) url: Url,
+    pub(crate) headers: HashMap<String, String>,
+    pub(crate) body: Option<Body>,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) version: Version,
+}
+
 /// A builder to construct the properties of a `Request`.
 ///
 /// To construct a `RequestBuilder`, refer to the `Client` documentation.
 #[must_use = "RequestBuilder does nothing until you 'send' it"]
+#[derive(Clone)]
 pub struct RequestBuilder {
-    client: Client,
+    client: ProcessRef<InnerClient>,
     request: crate::Result<Request>,
+}
+
+impl TryFrom<Request> for InnerRequest {
+    type Error = crate::Error;
+
+    fn try_from(value: Request) -> Result<Self, Self::Error> {
+        Ok(InnerRequest {
+            method: value.method.to_string(),
+            url: value.url,
+            headers: hashmap_from_header_map(value.headers),
+            body: value.body,
+            timeout: value.timeout,
+            version: value.version,
+        })
+    }
+}
+
+pub(crate) fn hashmap_from_header_map(headers: HeaderMap) -> HashMap<String, String> {
+    HashMap::from_iter(
+        headers
+            .into_iter()
+            .filter_map(|(k, v)| k.map(|k| (k.to_string(), v.to_str().unwrap().to_string()))),
+    )
+}
+
+pub(crate) fn header_map_from_hashmap(headers: HashMap<String, String>) -> HeaderMap {
+    HeaderMap::from_iter(headers.iter().map(|(k, v)| {
+        (
+            HeaderName::from_str(k.as_str()).unwrap(),
+            HeaderValue::from_str(v.as_str()).unwrap(),
+        )
+    }))
+}
+
+impl InnerRequest {
+    pub(super) fn pieces(
+        self,
+    ) -> (
+        Method,
+        Url,
+        HeaderMap,
+        Option<Body>,
+        Option<Duration>,
+        Version,
+    ) {
+        // convert back into request to change less http encoding/decoding code
+        (
+            Method::from_str(self.method.as_str()).unwrap(),
+            self.url,
+            header_map_from_hashmap(self.headers),
+            self.body,
+            self.timeout,
+            self.version,
+        )
+    }
 }
 
 impl Request {
@@ -48,7 +122,7 @@ impl Request {
     #[inline]
     pub fn new(method: Method, url: Url) -> Self {
         Request {
-            method,
+            method: method,
             url,
             headers: HeaderMap::new(),
             body: None,
@@ -144,30 +218,13 @@ impl Request {
     //     req.body = body;
     //     Some(req)
     // }
-
-    pub(super) fn pieces(
-        self,
-    ) -> (
-        Method,
-        Url,
-        HeaderMap,
-        Option<Body>,
-        Option<Duration>,
-        Version,
-    ) {
-        (
-            self.method,
-            self.url,
-            self.headers,
-            self.body,
-            self.timeout,
-            self.version,
-        )
-    }
 }
 
 impl RequestBuilder {
-    pub(super) fn new(client: Client, request: crate::Result<Request>) -> RequestBuilder {
+    pub(super) fn new(
+        client: ProcessRef<InnerClient>,
+        request: crate::Result<Request>,
+    ) -> RequestBuilder {
         let mut builder = RequestBuilder { client, request };
 
         let auth = builder
@@ -213,7 +270,7 @@ impl RequestBuilder {
                         if sensitive {
                             value.set_sensitive(true);
                         }
-                        req.headers_mut().append(key, value);
+                        req.headers_mut().insert(key, value);
                     }
                     Err(e) => error = Some(crate::error::builder(e.into())),
                 },
@@ -231,7 +288,7 @@ impl RequestBuilder {
     /// The headers will be merged in to any already set.
     pub fn headers(mut self, headers: crate::header::HeaderMap) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {
-            crate::util::replace_headers(req.headers_mut(), headers);
+            crate::util::replace_headers(&mut req.headers_mut(), headers);
         }
         self
     }
@@ -528,7 +585,7 @@ impl RequestBuilder {
     /// ```
     pub fn send(mut self) -> Result<HttpResponse, crate::Error> {
         match self.request {
-            Ok(req) => self.client.execute_request(req, vec![]),
+            Ok(req) => self.client.execute(req),
             Err(err) => Err(err),
         }
     }
@@ -639,56 +696,65 @@ where
             headers,
             body: Some(body.into()),
             timeout: None,
-            version,
+            version: Version::from(version),
         })
     }
 }
 
-impl TryFrom<Request> for HttpRequest<Body> {
-    type Error = crate::Error;
+// impl TryFrom<Request> for HttpRequest<Body> {
+//     type Error = crate::Error;
 
-    fn try_from(req: Request) -> crate::Result<Self> {
-        let Request {
-            method,
-            url,
-            headers,
-            body,
-            version,
-            ..
-        } = req;
+//     fn try_from(req: Request) -> crate::Result<Self> {
+//         let Request {
+//             method,
+//             url,
+//             headers,
+//             body,
+//             version,
+//             ..
+//         } = req;
 
-        let mut req = HttpRequest::builder()
-            .version(version)
-            .method(method)
-            .uri(url.as_str())
-            .body(body.unwrap_or_else(Body::empty))
-            .map_err(crate::error::builder)?;
+//         let mut req = HttpRequest::builder()
+//             .version(version)
+//             .method(method)
+//             .uri(url.as_str())
+//             .body(body.unwrap_or_else(Body::empty))
+//             .map_err(crate::error::builder)?;
 
-        *req.headers_mut() = headers;
-        Ok(req)
-    }
-}
+//         *req.headers_mut() = headers;
+//         Ok(req)
+//     }
+// }
 
 #[derive(Debug)]
 pub(crate) struct PendingRequest<'a> {
     /// parsed response
     res: HttpResponse,
-    client: &'a mut Client,
-    req: Request,
+    client: &'a mut InnerClient,
+    // client_process: ProcessRef<Client>,
+    req: InnerRequest,
     urls: Vec<Url>,
 }
 
 impl<'a> PendingRequest<'a> {
-    pub fn new(res: HttpResponse, client: &'a mut Client, req: Request, urls: Vec<Url>) -> Self {
+    pub fn new(
+        res: HttpResponse,
+        client: &'a mut InnerClient,
+        // client_process: ProcessRef<Client>,
+        req: InnerRequest,
+        urls: Vec<Url>,
+    ) -> Self {
         Self {
             res,
             client,
+            // client_process,
             req,
             urls,
         }
     }
 
-    /// return either a parsed
+    /// return either a parsed response or an error if there's a redirect loop
+    /// or if maximum redirects were reached
     pub fn resolve(mut self) -> Result<HttpResponse, crate::Error> {
         #[cfg(feature = "cookies")]
         {
@@ -712,10 +778,10 @@ impl<'a> PendingRequest<'a> {
                     self.res.headers.remove(header);
                 }
 
-                match self.req.method {
-                    Method::GET | Method::HEAD => {}
+                match self.req.method.as_str() {
+                    "GET" | "HEAD" => {}
                     _ => {
-                        self.req.method = Method::GET;
+                        self.req.method = "GET".to_string();
                     }
                 }
                 true
@@ -755,7 +821,9 @@ impl<'a> PendingRequest<'a> {
                 println!("GOT LOCATION {:?}", loc);
                 if self.client.referer {
                     if let Some(referer) = make_referer(&loc, &self.req.url) {
-                        self.req.headers.insert(REFERER, referer);
+                        self.req
+                            .headers
+                            .insert(REFERER.to_string(), referer.to_str().unwrap().to_string());
                     }
                 }
                 let url = self.req.url.clone();
@@ -774,27 +842,31 @@ impl<'a> PendingRequest<'a> {
                         }
 
                         self.req.url = loc;
-                        let mut headers =
-                            std::mem::replace(&mut self.req.headers, HeaderMap::new());
+                        let mut headers = std::mem::replace(&mut self.req.headers, HashMap::new());
 
                         remove_sensitive_headers(&mut headers, &self.req.url, &self.urls);
-                        let req = Request::new(self.req.method, self.req.url.clone());
-                        let mut req = RequestBuilder::new(self.client.clone(), Ok(req.clone()))
-                            .body(req.body.unwrap_or(().into()))
-                            .build()
-                            .expect("valid request parts");
+                        let req = Request::new(
+                            // it's fine to unwrap here because the method was constructed with a valid builder
+                            Method::from_str(self.req.method.as_str()).unwrap(),
+                            self.req.url.clone(),
+                        );
+                        let mut req = req.clone();
 
                         // Add cookies from the cookie store.
                         #[cfg(feature = "cookies")]
                         {
                             if let Some(ref cookie_store) = self.client.cookie_store {
-                                add_cookie_header(&mut headers, &**cookie_store, &self.req.url);
+                                add_cookie_header(
+                                    &mut headers,
+                                    cookie_store.clone(),
+                                    &self.req.url,
+                                );
                             }
                         }
 
-                        *req.headers_mut() = headers.clone();
+                        *req.headers_mut() = header_map_from_hashmap(headers.clone());
                         std::mem::swap(&mut self.req.headers, &mut headers);
-                        return self.client.execute_request(req, self.urls);
+                        return self.client.execute_request(req.try_into()?, self.urls);
                     }
                     redirect::ActionKind::Stop => {
                         lunatic_log::debug!("redirect policy disallowed redirection to '{}'", loc);
@@ -824,13 +896,15 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
 
 #[cfg(test)]
 mod tests {
-    use super::Client;
+    use crate::lunatic_impl::client::ClientProcess;
+
+    use super::InnerClient;
     use serde::Serialize;
     use std::collections::BTreeMap;
 
     #[lunatic::test]
     fn add_query_append() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -843,7 +917,7 @@ mod tests {
 
     #[test]
     fn add_query_append_same() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -861,7 +935,7 @@ mod tests {
             qux: i32,
         }
 
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -882,7 +956,7 @@ mod tests {
         params.insert("foo", "bar");
         params.insert("qux", "three");
 
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://google.com/";
         let r = client.get(some_url);
 
@@ -900,7 +974,7 @@ mod tests {
         headers.insert("foo", "bar".parse().unwrap());
         headers.append("foo", "baz".parse().unwrap());
 
-        let client = Client::new();
+        let client = InnerClient::new();
         let req = client
             .get("https://hyper.rs")
             .header("im-a", "keeper")
@@ -919,7 +993,7 @@ mod tests {
 
     #[test]
     fn normalize_empty_query() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://google.com/";
         let empty_query: &[(&str, &str)] = &[];
 
@@ -966,7 +1040,7 @@ mod tests {
 
     #[test]
     fn convert_url_authority_into_basic_auth() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://Aladdin:open sesame@localhost/";
 
         let req = client.get(some_url).build().expect("request build");
@@ -980,7 +1054,7 @@ mod tests {
 
     #[test]
     fn test_basic_auth_sensitive_header() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://localhost/";
 
         let req = client
@@ -999,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_bearer_auth_sensitive_header() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://localhost/";
 
         let req = client
@@ -1015,7 +1089,7 @@ mod tests {
 
     #[test]
     fn test_explicit_sensitive_header() {
-        let client = Client::new();
+        let client = InnerClient::new();
         let some_url = "https://localhost/";
 
         let mut header = http::HeaderValue::from_static("in plain sight");
