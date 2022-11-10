@@ -3,7 +3,6 @@ use std::any::Any;
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Write;
-use std::sync::Arc;
 use std::time::Duration;
 
 use http::header::{
@@ -14,8 +13,7 @@ use http::{Uri, Version};
 use lunatic::process::{
     AbstractProcess, ProcessRef, Request as LunaticRequest, RequestHandler, StartProcess,
 };
-use lunatic::{abstract_process, Tag};
-use serde::de::DeserializeOwned;
+use lunatic::Tag;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
@@ -363,9 +361,14 @@ impl InnerClient {
         let mut encoded = request_to_vec(
             method,
             url.clone(),
-            headers,
+            headers.clone(),
             body,
             version.try_into().unwrap(),
+        );
+        println!(
+            "GOT HEADERS {:?} | ENCODED REQUEST {:?}",
+            headers,
+            String::from_utf8(encoded.clone())
         );
 
         let mut stream = self.ensure_connection(url.clone())?;

@@ -2,15 +2,12 @@ use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::io::Write;
-use std::iter::FromIterator;
 use std::str::FromStr;
 use std::time::Duration;
 
 use base64::write::EncoderWriter as Base64Encoder;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, LOCATION, REFERER, TRANSFER_ENCODING};
 use http::StatusCode;
-use lunatic::process::ProcessRef;
-use lunatic::{abstract_process, Tag};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "json")]
 use serde_json;
@@ -46,7 +43,7 @@ pub struct Request {
 pub(crate) struct InnerRequest {
     pub(crate) method: String,
     pub(crate) url: Url,
-    pub(crate) headers: HashMap<String, String>,
+    pub(crate) headers: HashMap<String, Vec<String>>,
     pub(crate) body: Option<Body>,
     pub(crate) timeout: Option<Duration>,
     pub(crate) version: Version,
@@ -77,21 +74,33 @@ impl TryFrom<Request> for InnerRequest {
     }
 }
 
-pub(crate) fn hashmap_from_header_map(headers: HeaderMap) -> HashMap<String, String> {
-    HashMap::from_iter(
-        headers
-            .into_iter()
-            .filter_map(|(k, v)| k.map(|k| (k.to_string(), v.to_str().unwrap().to_string()))),
-    )
+pub(crate) fn hashmap_from_header_map(headers: HeaderMap) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+    let mut curr_key = String::new();
+    headers.clone().into_iter().for_each(|(k, v)| {
+        let (k, v) = (k.map(|x| x.to_string()), v.to_str().unwrap().to_string());
+        if let Some(key) = k {
+            curr_key = key;
+        }
+        map.entry(curr_key.clone()).or_insert(vec![]).push(v);
+    });
+    lunatic_log::debug!(
+        "Transformed headers to internal structures {:?} | NEW {:?}",
+        headers,
+        map
+    );
+    map
 }
 
-pub(crate) fn header_map_from_hashmap(headers: HashMap<String, String>) -> HeaderMap {
-    HeaderMap::from_iter(headers.iter().map(|(k, v)| {
-        (
-            HeaderName::from_str(k.as_str()).unwrap(),
-            HeaderValue::from_str(v.as_str()).unwrap(),
-        )
-    }))
+pub(crate) fn header_map_from_hashmap(headers: HashMap<String, Vec<String>>) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    headers.iter().for_each(|(k, v)| {
+        let key = HeaderName::from_str(k.as_str()).unwrap();
+        v.iter().for_each(|v| {
+            map.append(key.clone(), HeaderValue::from_str(v.as_str()).unwrap());
+        })
+    });
+    map
 }
 
 impl InnerRequest {
@@ -267,7 +276,7 @@ impl RequestBuilder {
                         if sensitive {
                             value.set_sensitive(true);
                         }
-                        req.headers_mut().insert(key, value);
+                        req.headers_mut().append(key, value);
                     }
                     Err(e) => error = Some(crate::error::builder(e.into())),
                 },
@@ -814,13 +823,13 @@ impl<'a> PendingRequest<'a> {
                 }
                 loc
             });
+
+            // map headers back to http type because it can handle multiple headers
+            let mut headers = header_map_from_hashmap(self.req.headers.clone());
             if let Some(loc) = loc {
-                println!("GOT LOCATION {:?}", loc);
                 if self.client.referer {
                     if let Some(referer) = make_referer(&loc, &self.req.url) {
-                        self.req
-                            .headers
-                            .insert(REFERER.to_string(), referer.to_str().unwrap().to_string());
+                        headers.insert(REFERER, referer);
                     }
                 }
                 let url = self.req.url.clone();
@@ -832,14 +841,18 @@ impl<'a> PendingRequest<'a> {
 
                 match action {
                     redirect::ActionKind::Follow => {
-                        println!("redirecting '{}' to '{}'", self.req.url, loc);
+                        lunatic_log::debug!(
+                            "redirecting '{}' to '{}' with headers {:?}",
+                            self.req.url,
+                            loc,
+                            headers
+                        );
 
                         if self.client.https_only && loc.scheme() != "https" {
                             return Err(error::redirect(error::url_bad_scheme(loc.clone()), loc));
                         }
 
                         self.req.url = loc;
-                        let mut headers = std::mem::replace(&mut self.req.headers, HashMap::new());
 
                         remove_sensitive_headers(&mut headers, &self.req.url, &self.urls);
                         let req = Request::new(
@@ -848,6 +861,7 @@ impl<'a> PendingRequest<'a> {
                             self.req.url.clone(),
                         );
                         let mut req = req.clone();
+                        req.headers = headers;
 
                         // Add cookies from the cookie store.
                         #[cfg(feature = "cookies")]
@@ -861,8 +875,6 @@ impl<'a> PendingRequest<'a> {
                             }
                         }
 
-                        *req.headers_mut() = header_map_from_hashmap(headers.clone());
-                        std::mem::swap(&mut self.req.headers, &mut headers);
                         return self.client.execute_request(req.try_into()?, self.urls);
                     }
                     redirect::ActionKind::Stop => {
@@ -888,6 +900,7 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
     let _ = referer.set_username("");
     let _ = referer.set_password(None);
     referer.set_fragment(None);
+    println!("MAKING REFERER {:?}", referer.as_str());
     referer.as_str().parse().ok()
 }
 
@@ -895,7 +908,6 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
 mod tests {
     use crate::Client;
 
-    use super::InnerClient;
     use http::Method;
     use serde::Serialize;
     use std::collections::BTreeMap;

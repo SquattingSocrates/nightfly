@@ -4,7 +4,6 @@ use std::error::Error as StdError;
 use std::fmt;
 use std::io;
 
-use crate::HttpResponse;
 use crate::SerializableResponse;
 use crate::{StatusCode, Url};
 

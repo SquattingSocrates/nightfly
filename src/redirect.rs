@@ -4,11 +4,10 @@
 //! maximum redirect chain of 10 hops. To customize this behavior, a
 //! `redirect::Policy` can be used with a `ClientBuilder`.
 
+use std::error::Error as StdError;
 use std::fmt;
-use std::{collections::HashMap, error::Error as StdError};
 
 use crate::header::{HeaderMap, AUTHORIZATION, COOKIE, PROXY_AUTHORIZATION, WWW_AUTHENTICATE};
-use crate::lunatic_impl::request::hashmap_from_header_map;
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -235,21 +234,17 @@ pub(crate) enum ActionKind {
     Error(Box<dyn StdError + Send + Sync>),
 }
 
-pub(crate) fn remove_sensitive_headers(
-    headers: &mut HashMap<String, String>,
-    next: &Url,
-    previous: &[Url],
-) {
+pub(crate) fn remove_sensitive_headers(headers: &mut HeaderMap, next: &Url, previous: &[Url]) {
     println!("REMOVED SENSITIVE HEADERS {:?}", headers);
     if let Some(previous) = previous.last() {
         let cross_host = next.host_str() != previous.host_str()
             || next.port_or_known_default() != previous.port_or_known_default();
         if cross_host {
-            headers.remove(AUTHORIZATION.as_str());
-            headers.remove(COOKIE.as_str());
+            headers.remove(AUTHORIZATION);
+            headers.remove(COOKIE);
             headers.remove("cookie2");
-            headers.remove(PROXY_AUTHORIZATION.as_str());
-            headers.remove(WWW_AUTHENTICATE.as_str());
+            headers.remove(PROXY_AUTHORIZATION);
+            headers.remove(WWW_AUTHENTICATE);
         }
     }
 }
@@ -333,15 +328,14 @@ fn test_remove_sensitive_headers() {
     let next = Url::parse("http://initial-domain.com/path").unwrap();
     let mut prev = vec![Url::parse("http://initial-domain.com/new_path").unwrap()];
     let mut filtered_headers = headers.clone();
-    let mut headers = hashmap_from_header_map(headers);
 
     remove_sensitive_headers(&mut headers, &next, &prev);
-    assert_eq!(headers, hashmap_from_header_map(filtered_headers.clone()));
+    assert_eq!(headers, filtered_headers);
 
     prev.push(Url::parse("http://new-domain.com/path").unwrap());
     filtered_headers.remove(AUTHORIZATION);
     filtered_headers.remove(COOKIE);
 
     remove_sensitive_headers(&mut headers, &next, &prev);
-    assert_eq!(headers, hashmap_from_header_map(filtered_headers));
+    assert_eq!(headers, filtered_headers);
 }

@@ -49,6 +49,13 @@ fn overwrite_headers(headers: HeaderMap) -> SubmsResponse {
 }
 
 fn appended_headers(headers: HeaderMap) -> SubmsResponse {
+    let mut h = headers.get_all("accept").iter();
+    lunatic_log::info!(
+        "GOT HEADERS {:?} | {:?} | {:?}",
+        headers,
+        h.next(),
+        h.next()
+    );
     let mut accepts = headers.get_all("accept").into_iter();
     assert_eq!(accepts.next().unwrap(), "application/json");
     assert_eq!(accepts.next().unwrap(), "application/json+hal");
@@ -78,15 +85,6 @@ fn test_response_text() {
 
     let url = format!("http://{}/text", ADDR);
     let res = nightfly::get(&url).unwrap();
-    println!(
-        "RES {:?} = {:?} \n {:?} = {:?} \n {:?} = {:?}",
-        res.url().as_str(),
-        &url,
-        res.status(),
-        nightfly::StatusCode::OK,
-        res.content_length(),
-        Some(5)
-    );
     assert_eq!(res.url().as_str(), &url);
     assert_eq!(res.status(), nightfly::StatusCode::OK);
     assert_eq!(res.content_length(), Some(5));

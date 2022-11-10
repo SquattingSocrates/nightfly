@@ -18,8 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.playground]
 features = [
-  "json",
-  "multipart",
+  "json", # "multipart",
 ]
 
 [features]
@@ -36,7 +35,7 @@ http = "0.2"
 http-body = "0.4.5"
 httparse = "1.7.1"
 ipnet = "2.5.0"
-lunatic = {path = "../rust-lib"}
+lunatic = {git = "https://github.com/lunatic-solutions/lunatic-rs"}
 lunatic-log = "0.2"
 mime = "0.3.16"
 percent-encoding = "2.2.0"
@@ -68,7 +67,7 @@ trust-dns-resolver = {version = "0.22", optional = true}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/bheisler/criterion.rs", branch = "version-0.4", default-features = false}
-submillisecond = {path = "../submillisecond", features = [
+submillisecond = {git = "https://github.com/lunatic-solutions/submillisecond", features = [
   "cookies",
   "json",
   "logging",
@@ -115,22 +114,19 @@ required-features = ["cookies"]
 [[test]]
 name = "gzip"
 path = "tests/gzip.rs"
-required-features = ["gzip"]
 
 [[test]]
 name = "brotli"
 path = "tests/brotli.rs"
-required-features = ["brotli"]
 
 [[test]]
 name = "deflate"
 path = "tests/deflate.rs"
-required-features = ["deflate"]
 
-[[test]]
-name = "multipart"
-path = "tests/multipart.rs"
-required-features = ["multipart"]
+# [[test]]
+# name = "multipart"
+# path = "tests/multipart.rs"
+# required-features = ["multipart"]
 
 [rust-analyzer.cargo]
 features = ["deflate"]

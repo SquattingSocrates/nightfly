@@ -1,19 +1,17 @@
 use core::fmt;
 use std::{
     collections::HashMap,
-    convert::{TryFrom, TryInto},
-    iter::FromIterator,
+    convert::TryInto,
     net::{IpAddr, SocketAddr},
-    str::FromStr,
     time::Duration,
 };
 
 use http::{
-    header::{HeaderName, ACCEPT, USER_AGENT},
+    header::{ACCEPT, USER_AGENT},
     HeaderMap, HeaderValue,
 };
 use lunatic::process::StartProcess;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
 use crate::cookie::CookieJar;
@@ -43,7 +41,7 @@ enum HttpVersionPref {
 pub(crate) struct Config {
     // NOTE: When adding a new field, update `fmt::Debug for ClientBuilder`
     pub(crate) accepts: Accepts,
-    headers: HashMap<String, String>,
+    headers: HashMap<String, Vec<String>>,
     #[cfg(feature = "native-tls")]
     hostname_verification: bool,
     #[cfg(feature = "__tls")]
@@ -196,7 +194,7 @@ impl ClientBuilder {
         // let mut headers: HeaderMap<HeaderValue> = HeaderMap::with_capacity(2);
         // headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         let mut headers = HashMap::new();
-        headers.insert(ACCEPT.to_string(), "*/*".to_string());
+        headers.insert(ACCEPT.to_string(), vec!["*/*".to_string()]);
 
         ClientBuilder {
             config: Config {
@@ -375,9 +373,10 @@ impl ClientBuilder {
     {
         match value.try_into() {
             Ok(value) => {
-                self.config
-                    .headers
-                    .insert(USER_AGENT.to_string(), value.to_str().unwrap().to_string());
+                self.config.headers.insert(
+                    USER_AGENT.to_string(),
+                    vec![value.to_str().unwrap().to_string()],
+                );
             }
             Err(e) => {
                 self.config.error = Some(crate::error::builder(e.into()));
@@ -433,7 +432,7 @@ impl ClientBuilder {
         for (key, value) in headers.iter() {
             self.config
                 .headers
-                .insert(key.to_string(), value.to_str().unwrap().to_string());
+                .insert(key.to_string(), vec![value.to_str().unwrap().to_string()]);
         }
         self
     }

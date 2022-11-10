@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::http_stream::HttpStream;
 use super::request::InnerRequest;
 use super::InnerClient;
-use crate::{HttpResponse, Request};
+use crate::HttpResponse;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub(crate) struct Accepts {

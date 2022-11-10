@@ -39,7 +39,7 @@ pub struct SerializableResponse {
     pub version: Version,
 
     /// The response's headers as hashmap from Headermap
-    pub headers: HashMap<String, String>,
+    pub headers: HashMap<String, Vec<String>>,
 
     pub(super) url: Url,
     // pub info: HttpInfo,
