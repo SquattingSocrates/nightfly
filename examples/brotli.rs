@@ -29,7 +29,7 @@ fn main(_: Mailbox<()>) -> () {
 
     let body = res.text().unwrap();
 
-    println!("{}", body);
+    println!("BODY {}", body);
 
     // Ok(())
 }

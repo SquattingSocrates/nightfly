@@ -1,4 +1,4 @@
-//! `cargo run --example blocking --features=blocking`
+//! `cargo run --example cookies --features=features`
 #![deny(warnings)]
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Headers: {:#?}\n", res.headers());
 
     // copy the response body directly to stdout
-    println!("Body: {:?}", res.body());
+    println!("Body: {:?}", res.text());
 
     Ok(())
 }

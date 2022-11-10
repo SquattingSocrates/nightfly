@@ -32,6 +32,7 @@ pub(crate) struct Decoder {
     reader: HttpBodyReader,
 }
 
+#[derive(Debug)]
 enum MessageEncoding {
     Gzip,
     Brotli,
@@ -118,30 +119,26 @@ impl Decoder {
                 url: reader.req.url.clone(),
             };
         }
-        let buf = if !self.reader.no_content_length_required() {
-            match &self.encoding {
-                MessageEncoding::Brotli => {
-                    let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
-                    let mut buf = Vec::new();
-                    let _ = decoder.read_to_end(&mut buf).unwrap();
-                    buf
-                }
-                MessageEncoding::Gzip => {
-                    let mut decoder = GzDecoder::new(&mut self.reader);
-                    let mut buf = Vec::new();
-                    let _ = decoder.read_to_end(&mut buf).unwrap();
-                    buf
-                }
-                MessageEncoding::Deflate => {
-                    let mut decoder = ZlibDecoder::new(&mut self.reader);
-                    let mut buf = Vec::new();
-                    let _ = decoder.read_to_end(&mut buf).unwrap();
-                    buf
-                }
-                _ => panic!("Cannot happen"),
+        let buf = match &self.encoding {
+            MessageEncoding::Brotli => {
+                let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
+                let mut buf = Vec::new();
+                let _ = decoder.read_to_end(&mut buf).unwrap();
+                buf
             }
-        } else {
-            vec![]
+            MessageEncoding::Gzip => {
+                let mut decoder = GzDecoder::new(&mut self.reader);
+                let mut buf = Vec::new();
+                let _ = decoder.read_to_end(&mut buf).unwrap();
+                buf
+            }
+            MessageEncoding::Deflate => {
+                let mut decoder = ZlibDecoder::new(&mut self.reader);
+                let mut buf = Vec::new();
+                let read = decoder.read_to_end(&mut buf).unwrap();
+                buf
+            }
+            _ => panic!("Cannot happen"),
         };
         HttpResponse {
             headers: self.reader.res.headers().to_owned(),
@@ -188,22 +185,18 @@ impl Decoder {
     /// Uses the correct variant by inspecting the Content-Encoding header.
     pub(super) fn detect(mut reader: HttpBodyReader, _accepts: Accepts) -> Decoder {
         let _headers = reader.res.headers_mut();
-        {
-            if _accepts.gzip && Decoder::detect_encoding(_headers, "gzip") {
-                return Decoder::gzip(reader);
-            }
+        println!(
+            "DETECTING ENCODING {:?} | accepts: {:?}",
+            _headers, _accepts
+        );
+        if _accepts.gzip && Decoder::detect_encoding(_headers, "gzip") {
+            return Decoder::gzip(reader);
         }
-
-        {
-            if _accepts.brotli && Decoder::detect_encoding(_headers, "br") {
-                return Decoder::brotli(reader);
-            }
+        if _accepts.brotli && Decoder::detect_encoding(_headers, "br") {
+            return Decoder::brotli(reader);
         }
-
-        {
-            if _accepts.deflate && Decoder::detect_encoding(_headers, "deflate") {
-                return Decoder::deflate(reader);
-            }
+        if _accepts.deflate && Decoder::detect_encoding(_headers, "deflate") {
+            return Decoder::deflate(reader);
         }
 
         Decoder::plain_text(reader)
