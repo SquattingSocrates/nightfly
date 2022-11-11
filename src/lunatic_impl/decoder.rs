@@ -119,7 +119,6 @@ impl Decoder {
                 url: reader.req.url.clone(),
             };
         }
-        println!("NOT OCTETS {:?}", self.reader.res.headers());
         let buf = if !self.reader.no_content_length_required() {
             match &self.encoding {
                 MessageEncoding::Brotli => {
@@ -137,7 +136,7 @@ impl Decoder {
                 MessageEncoding::Deflate => {
                     let mut decoder = ZlibDecoder::new(&mut self.reader);
                     let mut buf = Vec::new();
-                    let read = decoder.read_to_end(&mut buf).unwrap();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
                     buf
                 }
                 _ => panic!("Cannot happen"),
@@ -155,8 +154,6 @@ impl Decoder {
     }
 
     fn detect_encoding(headers: &mut HeaderMap, encoding_str: &str) -> bool {
-        use lunatic_log::warn;
-
         let mut is_content_encoded = {
             headers
                 .get_all(CONTENT_ENCODING)
@@ -170,15 +167,15 @@ impl Decoder {
         if is_content_encoded {
             if let Some(content_length) = headers.get(CONTENT_LENGTH) {
                 if content_length == "0" {
-                    warn!("{} response with content-length of 0", encoding_str);
+                    lunatic_log::warn!("{} response with content-length of 0", encoding_str);
                     is_content_encoded = false;
                 }
             }
         }
-        if is_content_encoded {
-            headers.remove(CONTENT_ENCODING);
-            headers.remove(CONTENT_LENGTH);
-        }
+        // if is_content_encoded {
+        //     headers.remove(CONTENT_ENCODING);
+        //     headers.remove(CONTENT_LENGTH);
+        // }
         is_content_encoded
     }
 
@@ -190,10 +187,6 @@ impl Decoder {
     /// Uses the correct variant by inspecting the Content-Encoding header.
     pub(super) fn detect(mut reader: HttpBodyReader, _accepts: Accepts) -> Decoder {
         let _headers = reader.res.headers_mut();
-        println!(
-            "DETECTING ENCODING {:?} | accepts: {:?}",
-            _headers, _accepts
-        );
         if _accepts.gzip && Decoder::detect_encoding(_headers, "gzip") {
             return Decoder::gzip(reader);
         }
@@ -287,20 +280,10 @@ pub(crate) fn parse_response(
         }
     };
     let response = http::Response::builder().status(status_code);
-    let mut content_lengt = None;
     let response = response_raw
         .headers
         .iter()
         .fold(response, |response, header| {
-            if header.name.to_lowercase() == "content-length" {
-                let value_string = std::str::from_utf8(header.value).unwrap();
-                let length = value_string.parse::<usize>().unwrap();
-                content_lengt = Some(length);
-            } else if header.name.to_lowercase() == "transfer-length" {
-                let value_string = std::str::from_utf8(header.value).unwrap();
-                let length = value_string.parse::<usize>().unwrap();
-                content_lengt = Some(length);
-            }
             response.header(header.name, header.value)
         });
 
@@ -308,8 +291,11 @@ pub(crate) fn parse_response(
         stream,
         response_buffer,
         offset,
+        body_offset: offset,
         res: response.body(vec![]).unwrap(),
         req,
+        chunk_body: vec![],
+        chunk_offset: 0,
     };
     Ok(Decoder::detect(reader, client.accepts()).decode())
 }
@@ -321,7 +307,9 @@ pub struct HttpBodyReader {
     pub(crate) response_buffer: Vec<u8>,
     pub(crate) offset: usize,
     pub(crate) req: InnerRequest,
-    // pub(crate) client: &'a mut Client,
+    pub(crate) body_offset: usize,
+    pub(crate) chunk_body: Vec<u8>,
+    pub(crate) chunk_offset: usize, // pub(crate) client: &'a mut Client,
 }
 
 impl HttpBodyReader {
@@ -335,55 +323,150 @@ impl HttpBodyReader {
             })
     }
 
+    pub fn transfer_encoding(&self) -> Vec<String> {
+        self.res
+            .headers()
+            .get_all(http::header::TRANSFER_ENCODING)
+            .iter()
+            .filter_map(|header| {
+                String::from_utf8(header.as_bytes().to_vec())
+                    .map(|s| Some(s))
+                    .unwrap_or(None)
+            })
+            .collect()
+    }
+
+    pub fn is_chunked(&self) -> bool {
+        self.transfer_encoding()
+            .iter()
+            .any(|e| e.as_str() == "chunked")
+    }
+
+    fn should_close_conn(&self) -> bool {
+        let connection_header = self.res.headers().get("connection");
+        connection_header.is_none() || connection_header.unwrap().as_bytes() == "close".as_bytes()
+    }
+
     pub fn no_content_length_required(&self) -> bool {
         let method = Method::from_str(&self.req.method).unwrap();
         let status = self.res.status();
         let status_num = status.as_u16();
-        let connection_header = self.res.headers().get("connection");
-        println!("METHOD {:?} | {:?} {:?}", method, status, status_num);
         method == http::Method::HEAD
-            || (method == http::Method::GET
-                && (connection_header.is_none()
-                    || connection_header.unwrap().as_bytes() == "close".as_bytes()))
+            || (method == http::Method::GET && self.should_close_conn())
             || status == http::StatusCode::NO_CONTENT
             || status == http::StatusCode::NOT_MODIFIED
             || (status_num >= 100 && status_num < 200)
     }
-}
 
-// fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
-//     if next.scheme() == "http" && previous.scheme() == "https" {
-//         return None;
-//     }
-
-//     let mut referer = previous.clone();
-//     let _ = referer.set_username("");
-//     let _ = referer.set_password(None);
-//     referer.set_fragment(None);
-//     referer.as_str().parse().ok()
-// }
-
-impl Read for HttpBodyReader {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        lunatic_log::info!(
-            "READ FROM HTTP BODY READER {:?} > {:?}",
-            self.offset,
-            self.response_buffer.len()
-        );
-        if self.offset > self.response_buffer.len() {
+    fn inner_read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // if response buffer doesn't have all the data
+        // try to read more from the stream
+        if self.offset >= self.response_buffer.len() {
+            lunatic_log::debug!(
+                "Fetching data from tcp stream. Buffer exceeded at {}",
+                self.offset
+            );
             // start reading from tcp stream
-            return self.stream.read(buf);
+            let mut next_batch = vec![0u8; buf.len()];
+            self.stream.read(&mut next_batch)?;
+            self.response_buffer.extend(next_batch);
         }
         let mut len_read = 0;
         for (idx, byte) in self.response_buffer[self.offset..].iter().enumerate() {
-            if idx > buf.len() {
+            if idx >= buf.len() {
                 break;
             }
             len_read += 1;
             buf[idx] = *byte;
         }
-        self.offset = len_read;
+        self.offset += len_read;
         Ok(len_read)
+    }
+
+    fn read_chunk(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        lunatic_log::debug!(
+            "Reading from chunked body: chunk_offset {} | chunk_body: {:?}",
+            self.chunk_offset,
+            self.chunk_body
+        );
+        if self.chunk_offset >= self.chunk_body.len() {
+            // start reading from tcp stream
+            return Ok(0);
+        }
+        let mut len_read = 0;
+        for (idx, byte) in self.chunk_body[self.chunk_offset..].iter().enumerate() {
+            if idx >= buf.len() {
+                break;
+            }
+            len_read += 1;
+            buf[idx] = *byte;
+        }
+        self.chunk_offset += len_read;
+        return Ok(len_read);
+    }
+}
+
+impl Read for HttpBodyReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.is_chunked() {
+            // if we're done with reading the chunked data
+            // we just read from the `self.chunk_body` buffer
+            if !self.chunk_body.is_empty() {
+                return self.read_chunk(buf);
+            }
+            // if data is transfered as chunked we want to consume it into `self.response_buffer()`
+            // this means that we need to pre-read the data because
+            loop {
+                let chunk = httparse::parse_chunk_size(&self.response_buffer[self.offset..]);
+                match chunk {
+                    // idx is the offset at which the content begins
+                    // so there's the size as well as CRLF
+                    // this means that the next chunk of size `size` starts from `idx`
+                    Ok(Status::Complete((idx, size))) => {
+                        // first, we need to consume the size and CRLF bytes
+                        self.offset += idx;
+
+                        if size == 0 && self.response_buffer[self.offset..].starts_with(b"\r\n") {
+                            // break because the reading has been completed and
+                            // the whole response body has been written into `self.chunk_body`
+                            return self.read_chunk(buf);
+                        }
+
+                        // now that we skipped the prefix we can consume the rest from
+                        // either the `response_buffer` or the `stream` in case the response_buffer
+                        // does not yet have all the data
+                        let mut chunk = vec![0u8; size as usize];
+                        let mut read_chunk_size = self.inner_read(&mut chunk)?;
+                        self.chunk_body.extend(chunk);
+
+                        // not done reading current chunk, need to finish current chunk
+                        while read_chunk_size < size as usize {
+                            let mut chunk = vec![0u8; size as usize - read_chunk_size];
+                            read_chunk_size = read_chunk_size + self.inner_read(&mut chunk)?;
+                            self.chunk_body.extend(chunk);
+                        }
+                    }
+                    Ok(Status::Partial) => {
+                        let mut buf = vec![0u8; REQUEST_BUFFER_SIZE];
+                        let n = self.stream.read(&mut buf).unwrap();
+                        self.response_buffer.extend(&buf[..n]);
+                    }
+                    Err(_) => {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "decoder::HttpBodyReader::read InvalidChunkSize",
+                        ));
+                    }
+                }
+            }
+        }
+
+        if let Some(len) = self.content_length() {
+            if self.offset - self.body_offset >= len {
+                return Ok(0);
+            }
+        }
+        self.inner_read(buf)
     }
 }
 

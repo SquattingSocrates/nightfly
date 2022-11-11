@@ -330,7 +330,6 @@ impl InnerClient {
         // insert default headers in the request headers
         // without overwriting already appended headers.
         for (key, value) in &self.headers {
-            println!("WRITING HEADER from client {:?}", headers.entry(key));
             if let Entry::Vacant(entry) = headers.entry(key) {
                 entry.insert(value.clone());
             }

@@ -900,7 +900,6 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
     let _ = referer.set_username("");
     let _ = referer.set_password(None);
     referer.set_fragment(None);
-    println!("MAKING REFERER {:?}", referer.as_str());
     referer.as_str().parse().ok()
 }
 

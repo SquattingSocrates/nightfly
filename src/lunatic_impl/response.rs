@@ -190,7 +190,6 @@ impl HttpResponse {
     /// ```
     /// # fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// let content = nightfly::get("http://httpbin.org/range/26")
-    ///     
     ///     .text_with_charset("utf-8")
     ///     ;
     ///

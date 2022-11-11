@@ -8,7 +8,7 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 * [x] redirect handling
 * [x] cookies and caching
 * [ ] timeouts
-* [ ] chunked responses
+* [x] chunked responses
 * [ ] proxy handling
 * [ ] upgrade, socks5 support and websockets
 * [ ] custom dns resolver
