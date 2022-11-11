@@ -119,26 +119,31 @@ impl Decoder {
                 url: reader.req.url.clone(),
             };
         }
-        let buf = match &self.encoding {
-            MessageEncoding::Brotli => {
-                let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
-                let mut buf = Vec::new();
-                let _ = decoder.read_to_end(&mut buf).unwrap();
-                buf
+        println!("NOT OCTETS {:?}", self.reader.res.headers());
+        let buf = if !self.reader.no_content_length_required() {
+            match &self.encoding {
+                MessageEncoding::Brotli => {
+                    let mut decoder = brotli::Decompressor::new(&mut self.reader, 4096);
+                    let mut buf = Vec::new();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                MessageEncoding::Gzip => {
+                    let mut decoder = GzDecoder::new(&mut self.reader);
+                    let mut buf = Vec::new();
+                    let _ = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                MessageEncoding::Deflate => {
+                    let mut decoder = ZlibDecoder::new(&mut self.reader);
+                    let mut buf = Vec::new();
+                    let read = decoder.read_to_end(&mut buf).unwrap();
+                    buf
+                }
+                _ => panic!("Cannot happen"),
             }
-            MessageEncoding::Gzip => {
-                let mut decoder = GzDecoder::new(&mut self.reader);
-                let mut buf = Vec::new();
-                let _ = decoder.read_to_end(&mut buf).unwrap();
-                buf
-            }
-            MessageEncoding::Deflate => {
-                let mut decoder = ZlibDecoder::new(&mut self.reader);
-                let mut buf = Vec::new();
-                let read = decoder.read_to_end(&mut buf).unwrap();
-                buf
-            }
-            _ => panic!("Cannot happen"),
+        } else {
+            vec![]
         };
         HttpResponse {
             headers: self.reader.res.headers().to_owned(),
@@ -334,8 +339,12 @@ impl HttpBodyReader {
         let method = Method::from_str(&self.req.method).unwrap();
         let status = self.res.status();
         let status_num = status.as_u16();
+        let connection_header = self.res.headers().get("connection");
+        println!("METHOD {:?} | {:?} {:?}", method, status, status_num);
         method == http::Method::HEAD
-            || method == http::Method::GET
+            || (method == http::Method::GET
+                && (connection_header.is_none()
+                    || connection_header.unwrap().as_bytes() == "close".as_bytes()))
             || status == http::StatusCode::NO_CONTENT
             || status == http::StatusCode::NOT_MODIFIED
             || (status_num >= 100 && status_num < 200)
