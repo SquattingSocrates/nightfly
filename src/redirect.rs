@@ -259,7 +259,7 @@ impl fmt::Display for TooManyRedirects {
 
 impl StdError for TooManyRedirects {}
 
-#[test]
+#[lunatic::test]
 fn test_redirect_policy_limit() {
     let policy = Policy::default();
     let next = Url::parse("http://x.y/z").unwrap();
@@ -280,7 +280,7 @@ fn test_redirect_policy_limit() {
     }
 }
 
-#[test]
+#[lunatic::test]
 fn test_redirect_policy_limit_to_0() {
     let policy = Policy::limited(0);
     let next = Url::parse("http://x.y/z").unwrap();
@@ -315,7 +315,7 @@ fn test_redirect_policy_limit_to_0() {
 //     }
 // }
 
-#[test]
+#[lunatic::test]
 fn test_remove_sensitive_headers() {
     use http::header::{HeaderValue, ACCEPT, AUTHORIZATION, COOKIE};
 

@@ -53,6 +53,14 @@ impl Into<Bytes> for Body {
     }
 }
 
+impl TryInto<String> for Body {
+    type Error = FromUtf8Error;
+
+    fn try_into(self) -> Result<String, Self::Error> {
+        String::from_utf8(self.0)
+    }
+}
+
 impl Body {
     /// empty body
     pub fn empty() -> Body {
@@ -92,6 +100,11 @@ impl Read for Body {
     }
 }
 
-use std::io::{Cursor, Read};
+use std::{
+    convert::TryInto,
+    io::{Cursor, Read},
+    str::Utf8Error,
+    string::FromUtf8Error,
+};
 
 use crate::HttpResponse;

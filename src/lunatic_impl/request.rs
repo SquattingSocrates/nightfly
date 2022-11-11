@@ -211,22 +211,6 @@ impl Request {
     pub fn version_mut(&mut self) -> &mut Version {
         &mut self.version
     }
-
-    // /// Attempt to clone the request.
-    // ///
-    // /// `None` is returned if the request can not be cloned, i.e. if the body is a stream.
-    // pub fn try_clone(&self) -> Option<Request> {
-    //     let body = match self.body.as_ref() {
-    //         Some(body) => Some(body.try_clone()?),
-    //         None => None,
-    //     };
-    //     let mut req = Request::new(self.method().clone(), self.url().clone());
-    //     *req.timeout_mut() = self.timeout().cloned();
-    //     *req.headers_mut() = self.headers().clone();
-    //     *req.version_mut() = self.version();
-    //     req.body = body;
-    //     Some(req)
-    // }
 }
 
 impl RequestBuilder {
@@ -350,6 +334,7 @@ impl RequestBuilder {
 
     /// Set the request body as json.
     pub fn json<T: Serialize>(mut self, body: T) -> RequestBuilder {
+        let mut serialisation_err = None;
         if let Ok(ref mut req) = self.request {
             req.headers_mut().append(
                 "content-type",
@@ -357,8 +342,14 @@ impl RequestBuilder {
             );
             *req.body_mut() = match Body::json(body) {
                 Ok(d) => Some(d),
-                Err(_) => None,
+                Err(err) => {
+                    serialisation_err = Some(crate::error::serialization(err));
+                    None
+                }
             };
+        }
+        if let Some(serialisation_err) = serialisation_err {
+            self.request = Err(serialisation_err);
         }
         self
     }
@@ -905,11 +896,15 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
 
 #[cfg(test)]
 mod tests {
-    use crate::Client;
+    use crate::{Body, Client};
 
-    use http::Method;
+    use http::{header, HeaderValue, Method};
     use serde::Serialize;
     use std::collections::BTreeMap;
+    use std::convert::TryInto;
+    use std::io::Read;
+    use std::str::Utf8Error;
+    use std::string::FromUtf8Error;
 
     #[lunatic::test]
     fn add_query_append() {
@@ -1107,246 +1102,150 @@ mod tests {
         assert!(req.headers()["hiding"].is_sensitive());
     }
 
-    // #[test]
-    // fn convert_from_http_request() {
-    //     let http_request = HttpRequest::builder()
-    //         .method("GET")
-    //         .uri("http://localhost/")
-    //         .header("User-Agent", "my-awesome-agent/1.0")
-    //         .body("test test test")
-    //         .unwrap();
-    //     let req: Request = Request::try_from(http_request).unwrap();
-    //     assert!(req.body().is_some());
-    //     let test_data = b"test test test";
-    //     assert_eq!(req.body().unwrap().as_bytes(), Some(&test_data[..]));
-    //     let headers = req.headers();
-    //     assert_eq!(headers.get("User-Agent").unwrap(), "my-awesome-agent/1.0");
-    //     assert_eq!(req.method(), Method::GET);
-    //     assert_eq!(req.url().as_str(), "http://localhost/");
-    // }
-
-    // #[test]
-    // fn set_http_request_version() {
-    //     let http_request = HttpRequest::builder()
-    //         .method("GET")
-    //         .uri("http://localhost/")
-    //         .header("User-Agent", "my-awesome-agent/1.0")
-    //         .version(Version::HTTP_11)
-    //         .body("test test test")
-    //         .unwrap();
-    //     let req: Request = Request::try_from(http_request).unwrap();
-    //     assert!(req.body().is_some());
-    //     let test_data = b"test test test";
-    //     assert_eq!(req.body().unwrap().as_bytes(), Some(&test_data[..]));
-    //     let headers = req.headers();
-    //     assert_eq!(headers.get("User-Agent").unwrap(), "my-awesome-agent/1.0");
-    //     assert_eq!(req.method(), Method::GET);
-    //     assert_eq!(req.url().as_str(), "http://localhost/");
-    //     assert_eq!(req.version(), Version::HTTP_11);
-    // }
-
-    /*
-    use {body, Method};
-    use super::Client;
-    use header::{Host, Headers, ContentType};
-    use std::collections::HashMap;
-    use serde_urlencoded;
     use serde_json;
+    use serde_urlencoded;
+    use std::collections::HashMap;
 
-    #[test]
+    #[lunatic::test]
     fn basic_get_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.get(some_url).unwrap().build();
+        let r = client.get(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Get);
+        assert_eq!(r.method, Method::GET);
         assert_eq!(r.url.as_str(), some_url);
     }
 
     #[test]
     fn basic_head_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.head(some_url).unwrap().build();
+        let r = client.head(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Head);
+        assert_eq!(r.method, Method::HEAD);
         assert_eq!(r.url.as_str(), some_url);
     }
 
-    #[test]
+    #[lunatic::test]
     fn basic_post_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.post(some_url).unwrap().build();
+        let r = client.post(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Post);
+        assert_eq!(r.method, Method::POST);
         assert_eq!(r.url.as_str(), some_url);
     }
 
-    #[test]
+    #[lunatic::test]
     fn basic_put_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.put(some_url).unwrap().build();
+        let r = client.put(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Put);
+        assert_eq!(r.method, Method::PUT);
         assert_eq!(r.url.as_str(), some_url);
     }
 
-    #[test]
+    #[lunatic::test]
     fn basic_patch_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.patch(some_url).unwrap().build();
+        let r = client.patch(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Patch);
+        assert_eq!(r.method, Method::PATCH);
         assert_eq!(r.url.as_str(), some_url);
     }
 
-    #[test]
+    #[lunatic::test]
     fn basic_delete_request() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let r = client.delete(some_url).unwrap().build();
+        let r = client.delete(some_url).build().unwrap();
 
-        assert_eq!(r.method, Method::Delete);
+        assert_eq!(r.method, Method::DELETE);
         assert_eq!(r.url.as_str(), some_url);
-    }
-
-    #[test]
-    fn add_header() {
-        let client = Client::new().unwrap();
-        let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
-
-        let header = Host {
-            hostname: "google.com".to_string(),
-            port: None,
-        };
-
-        // Add a copy of the header to the request builder
-        let r = r.header(header.clone()).build();
-
-        // then check it was actually added
-        assert_eq!(r.headers.get::<Host>(), Some(&header));
-    }
-
-    #[test]
-    fn add_headers() {
-        let client = Client::new().unwrap();
-        let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
-
-        let header = Host {
-            hostname: "google.com".to_string(),
-            port: None,
-        };
-
-        let mut headers = Headers::new();
-        headers.set(header);
-
-        // Add a copy of the headers to the request builder
-        let r = r.headers(headers.clone()).build();
-
-        // then make sure they were added correctly
-        assert_eq!(r.headers, headers);
-    }
-
-    #[test]
-    fn add_headers_multi() {
-        let client = Client::new().unwrap();
-        let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
-
-        let header = Host {
-            hostname: "google.com".to_string(),
-            port: None,
-        };
-
-        let mut headers = Headers::new();
-        headers.set(header);
-
-        // Add a copy of the headers to the request builder
-        let r = r.headers(headers.clone()).build();
-
-        // then make sure they were added correctly
-        assert_eq!(r.headers, headers);
     }
 
     #[test]
     fn add_body() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
+        let r = client.post(some_url);
 
         let body = "Some interesting content";
 
-        let r = r.body(body).build();
+        let r = r.body(body).build().unwrap();
+        let buf = r.body.unwrap().inner();
 
-        let buf = body::read_to_string(r.body.unwrap()).unwrap();
-
-        assert_eq!(buf, body);
+        assert_eq!(buf.iter().as_slice(), body.as_bytes());
     }
 
-    #[test]
-    fn add_form() {
-        let client = Client::new().unwrap();
-        let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
+    // #[test]
+    // fn add_form() {
+    //     let client = Client::new();
+    //     let some_url = "https://google.com/";
+    //     let mut r = client.post(some_url).unwrap();
 
-        let mut form_data = HashMap::new();
-        form_data.insert("foo", "bar");
+    //     let mut form_data = HashMap::new();
+    //     form_data.insert("foo", "bar");
 
-        let r = r.form(&form_data).unwrap().build();
+    //     let r = r.form(&form_data).unwrap().build();
 
-        // Make sure the content type was set
-        assert_eq!(r.headers.get::<ContentType>(),
-                   Some(&ContentType::form_url_encoded()));
+    //     // Make sure the content type was set
+    //     assert_eq!(
+    //         r.headers.get::<ContentType>(),
+    //         Some(&ContentType::form_url_encoded())
+    //     );
 
-        let buf = body::read_to_string(r.body.unwrap()).unwrap();
+    //     let buf = body::read_to_string(r.body.unwrap()).unwrap();
 
-        let body_should_be = serde_urlencoded::to_string(&form_data).unwrap();
-        assert_eq!(buf, body_should_be);
-    }
+    //     let body_should_be = serde_urlencoded::to_string(&form_data).unwrap();
+    //     assert_eq!(buf, body_should_be);
+    // }
 
     #[test]
     fn add_json() {
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
+        let r = client.post(some_url);
 
         let mut json_data = HashMap::new();
         json_data.insert("foo", "bar");
 
-        let r = r.json(&json_data).unwrap().build();
+        let r = r.json(&json_data).build().unwrap();
 
         // Make sure the content type was set
-        assert_eq!(r.headers.get::<ContentType>(), Some(&ContentType::json()));
+        assert_eq!(
+            r.headers.get("content-type"),
+            Some(&HeaderValue::from_str("application/json").unwrap())
+        );
 
-        let buf = body::read_to_string(r.body.unwrap()).unwrap();
+        let buf = String::from_utf8(r.body.unwrap().inner()).unwrap();
 
         let body_should_be = serde_json::to_string(&json_data).unwrap();
         assert_eq!(buf, body_should_be);
     }
 
-    #[test]
+    #[lunatic::test]
     fn add_json_fail() {
-        use serde::{Serialize, Serializer};
         use serde::ser::Error;
+        use serde::{Serialize, Serializer};
         struct MyStruct;
         impl Serialize for MyStruct {
             fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-                where S: Serializer
-                {
-                    Err(S::Error::custom("nope"))
-                }
+            where
+                S: Serializer,
+            {
+                Err(S::Error::custom("nope"))
+            }
         }
 
-        let client = Client::new().unwrap();
+        let client = Client::new();
         let some_url = "https://google.com/";
-        let mut r = client.post(some_url).unwrap();
-        let json_data = MyStruct{};
-        assert!(r.json(&json_data).unwrap_err().is_serialization());
+        let json_data = MyStruct {};
+        let r = client.post(some_url);
+        let res = r.json(&json_data).build();
+        println!("BUILDER ERR {:?}", res);
+        assert!(res.unwrap_err().is_serialization());
     }
-    */
 }

@@ -77,7 +77,7 @@ pub(crate) fn try_uri(url: &Url) -> Option<http::Uri> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[lunatic::test]
     fn into_url_file_scheme() {
         let err = "file:///etc/hosts".into_url().unwrap_err();
         assert_eq!(

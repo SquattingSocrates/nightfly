@@ -24,7 +24,7 @@ mod tests {
     use http::response::Builder;
     use url::Url;
 
-    #[test]
+    #[lunatic::test]
     fn test_response_builder_ext() {
         let url = Url::parse("http://example.com").unwrap();
         let response = Builder::new()

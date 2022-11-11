@@ -181,6 +181,7 @@
 pub use http::header;
 pub use http::Method;
 pub use http::StatusCode;
+pub use http::{HeaderMap, HeaderValue};
 pub use url::Url;
 
 // universal mods

@@ -425,32 +425,27 @@ impl ServerCertVerifier for NoVerifier {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "default-tls")]
-    #[test]
+    #[lunatic::test]
     fn certificate_from_der_invalid() {
         Certificate::from_der(b"not der").unwrap_err();
     }
 
-    #[cfg(feature = "default-tls")]
-    #[test]
+    #[lunatic::lunatic::test]
     fn certificate_from_pem_invalid() {
         Certificate::from_pem(b"not pem").unwrap_err();
     }
 
-    #[cfg(feature = "native-tls")]
-    #[test]
+    #[lunatic::test]
     fn identity_from_pkcs12_der_invalid() {
         Identity::from_pkcs12_der(b"not der", "nope").unwrap_err();
     }
 
-    #[cfg(feature = "__rustls")]
-    #[test]
+    #[lunatic::test]
     fn identity_from_pem_invalid() {
         Identity::from_pem(b"not pem").unwrap_err();
     }
 
-    #[cfg(feature = "__rustls")]
-    #[test]
+    #[lunatic::test]
     fn identity_from_pem_pkcs1_key() {
         let pem = b"-----BEGIN CERTIFICATE-----\n\
             -----END CERTIFICATE-----\n\
