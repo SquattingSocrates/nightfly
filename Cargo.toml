@@ -55,8 +55,8 @@ mime_guess = {version = "2.0", default-features = false, optional = true}
 brotli = {version = "3.3.4"}
 
 ## cookies
-cookie_crate = {path = "../cookie-rs", package = "cookie", optional = true}
-cookie_store = {version = "0.16", optional = true}
+cookie_crate = {version = "0.15", package = "cookie", optional = true}
+cookie_store = {version = "0.15", optional = true}
 proc-macro-hack = {version = "0.5.19", optional = true}
 
 ## compression
@@ -88,11 +88,6 @@ path = "examples/json_dynamic.rs"
 name = "json_typed"
 path = "examples/json_typed.rs"
 # required-features = ["json"]
-
-[[example]]
-name = "tor_socks"
-path = "examples/tor_socks.rs"
-required-features = ["socks"]
 
 [[example]]
 name = "form"

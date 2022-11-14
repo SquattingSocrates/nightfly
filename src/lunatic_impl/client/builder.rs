@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     convert::TryInto,
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -14,7 +15,7 @@ use lunatic::process::StartProcess;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
-use crate::cookie::CookieJar;
+use crate::cookie::Jar;
 
 use crate::{
     lunatic_impl::{decoder::Accepts, request::header_map_from_hashmap},
@@ -79,8 +80,8 @@ pub(crate) struct Config {
     http2_keep_alive_while_idle: bool,
     local_address: Option<IpAddr>,
     nodelay: bool,
-    #[cfg(feature = "cookies")]
-    cookie_store: Option<CookieJar>,
+    // #[cfg(feature = "cookies")]
+    // cookie_store: Option<Arc<Jar>>,
     // trust_dns: bool,
     error: Option<crate::Error>,
     https_only: bool,
@@ -92,12 +93,12 @@ impl Config {
         // Instead of deriving Debug, only print fields when their output
         // would provide relevant or interesting data.
 
-        #[cfg(feature = "cookies")]
-        {
-            if let Some(_) = self.cookie_store {
-                f.field("cookie_store", &true);
-            }
-        }
+        // #[cfg(feature = "cookies")]
+        // {
+        //     if let Some(_) = self.cookie_store {
+        //         f.field("cookie_store", &true);
+        //     }
+        // }
 
         f.field("accepts", &self.accepts);
 
@@ -242,8 +243,8 @@ impl ClientBuilder {
                 http2_keep_alive_while_idle: false,
                 local_address: None,
                 nodelay: true,
-                #[cfg(feature = "cookies")]
-                cookie_store: None,
+                // #[cfg(feature = "cookies")]
+                // cookie_store: None,
                 https_only: false,
                 dns_overrides: HashMap::new(),
             },
@@ -332,7 +333,7 @@ impl ClientBuilder {
         Ok(InnerClient {
             accepts: config.accepts,
             #[cfg(feature = "cookies")]
-            cookie_store: config.cookie_store,
+            cookie_store: Some(Arc::new(Jar::default())),
             headers: header_map_from_hashmap(config.headers),
             redirect_policy: config.redirect_policy,
             referer: config.referer,
@@ -437,35 +438,35 @@ impl ClientBuilder {
         self
     }
 
-    /// Enable a persistent cookie store for the client.
-    ///
-    /// Cookies received in responses will be preserved and included in
-    /// additional requests.
-    ///
-    /// By default, no cookie store is used.
-    ///
-    #[cfg(feature = "cookies")]
-    pub fn cookie_store(mut self, enable: bool) -> ClientBuilder {
-        if enable {
-            self.cookie_provider(CookieJar::default())
-        } else {
-            self.config.cookie_store = None;
-            self
-        }
-    }
+    // /// Enable a persistent cookie store for the client.
+    // ///
+    // /// Cookies received in responses will be preserved and included in
+    // /// additional requests.
+    // ///
+    // /// By default, no cookie store is used.
+    // ///
+    // #[cfg(feature = "cookies")]
+    // pub fn cookie_store(mut self, enable: bool) -> ClientBuilder {
+    //     if enable {
+    //         self.cookie_provider(Jar::default())
+    //     } else {
+    //         self.config.cookie_store = None;
+    //         self
+    //     }
+    // }
 
-    /// Set the persistent cookie store for the client.
-    ///
-    /// Cookies received in responses will be passed to this store, and
-    /// additional requests will query this store for cookies.
-    ///
-    /// By default, no cookie store is used.
-    ///
-    #[cfg(feature = "cookies")]
-    pub fn cookie_provider(mut self, cookie_store: CookieJar) -> ClientBuilder {
-        self.config.cookie_store = Some(cookie_store);
-        self
-    }
+    // /// Set the persistent cookie store for the client.
+    // ///
+    // /// Cookies received in responses will be passed to this store, and
+    // /// additional requests will query this store for cookies.
+    // ///
+    // /// By default, no cookie store is used.
+    // ///
+    // #[cfg(feature = "cookies")]
+    // pub fn cookie_provider(mut self, cookie_store: Jar) -> ClientBuilder {
+    //     self.config.cookie_store = Some(Arc::new(cookie_store));
+    //     self
+    // }
 
     /// Enable auto gzip decompression by checking the `Content-Encoding` response header.
     ///

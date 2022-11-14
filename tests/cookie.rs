@@ -157,10 +157,7 @@ fn cookie_response_accessor() {
 fn cookie_store_simple() {
     let _ = server::ensure_server();
 
-    let client = nightfly::Client::builder()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
 
     let url = format!("http://{}/1", ADDR);
     client.get(&url).send().unwrap();
@@ -173,10 +170,7 @@ fn cookie_store_simple() {
 fn cookie_store_overwrite_existing() {
     let _ = server::ensure_server();
 
-    let client = nightfly::Client::builder()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
 
     let url = format!("http://{}/overwrite", ADDR);
     client.get(&url).send().unwrap();
@@ -192,10 +186,7 @@ fn cookie_store_overwrite_existing() {
 fn cookie_store_max_age() {
     let _ = server::ensure_server();
 
-    let client = nightfly::Client::builder()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
     let url = format!("http://{}/max-age", ADDR);
     client.get(&url).send().unwrap();
     client.get(&url).send().unwrap();
@@ -205,10 +196,7 @@ fn cookie_store_max_age() {
 fn cookie_store_expires() {
     let _ = server::ensure_server();
 
-    let client = nightfly::Client::builder()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
 
     let url = format!("http://{}/expires", ADDR);
     client.get(&url).send().unwrap();
@@ -219,10 +207,7 @@ fn cookie_store_expires() {
 fn cookie_store_path() {
     let _ = server::ensure_server();
 
-    let client = nightfly::Client::builder()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
 
     let url = format!("http://{}/path", ADDR);
     client.get(&url).send().unwrap();

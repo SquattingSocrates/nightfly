@@ -291,10 +291,7 @@ fn test_redirect_302_with_set_cookies() {
     let url = format!("http://{}/302-cookie", ADDR);
     let dst = format!("http://{}/{}", ADDR, "dst");
 
-    let client = nightfly::ClientBuilder::new()
-        .cookie_store(true)
-        .build()
-        .unwrap();
+    let client = nightfly::ClientBuilder::new().build().unwrap();
     let res = client.get(&url).send().unwrap();
 
     assert_eq!(res.url().as_str(), dst);

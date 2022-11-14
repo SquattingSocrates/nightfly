@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::header::{
@@ -17,8 +18,6 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
 use crate::cookie;
-#[cfg(feature = "cookies")]
-use crate::cookie::CookieJar;
 use crate::error;
 use crate::into_url::expect_uri;
 use crate::lunatic_impl::request::{hashmap_from_header_map, InnerRequest};
@@ -37,7 +36,7 @@ use crate::{IntoUrl, Method, Url};
 pub struct InnerClient {
     pub(crate) accepts: Accepts,
     #[cfg(feature = "cookies")]
-    pub(crate) cookie_store: Option<CookieJar>,
+    pub(crate) cookie_store: Option<Arc<cookie::Jar>>,
     pub(crate) headers: HeaderMap,
     pub(crate) redirect_policy: redirect::Policy,
     pub(crate) referer: bool,
@@ -501,9 +500,11 @@ impl fmt::Debug for ClientBuilder {
 #[cfg(feature = "cookies")]
 pub(crate) fn add_cookie_header(
     headers: &mut HeaderMap,
-    cookie_store: cookie::CookieJar,
+    cookie_store: Arc<cookie::Jar>,
     url: &Url,
 ) {
+    use crate::cookie::CookieStore;
+
     if let Some(header) = cookie_store.cookies(url) {
         headers.insert(crate::header::COOKIE, header);
     }

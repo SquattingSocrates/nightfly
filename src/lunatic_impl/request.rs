@@ -9,15 +9,13 @@ use base64::write::EncoderWriter as Base64Encoder;
 use http::header::{CONTENT_ENCODING, CONTENT_LENGTH, LOCATION, REFERER, TRANSFER_ENCODING};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "json")]
-use serde_json;
 
 use super::client::InnerClient;
 #[cfg(feature = "multipart")]
 use super::multipart;
 use super::response::HttpResponse;
 #[cfg(feature = "cookies")]
-use crate::cookie;
+use crate::cookie::{self, CookieStore};
 #[cfg(feature = "multipart")]
 use crate::header::CONTENT_LENGTH;
 use crate::header::{HeaderMap, HeaderName, HeaderValue, CONTENT_TYPE};
@@ -510,36 +508,6 @@ impl RequestBuilder {
         self
     }
 
-    /// Send a JSON body.
-    ///
-    /// # Optional
-    ///
-    /// This requires the optional `json` feature enabled.
-    ///
-    /// # Errors
-    ///
-    /// Serialization can fail if `T`'s implementation of `Serialize` decides to
-    /// fail, or if `T` contains a map with non-string keys.
-    #[cfg(feature = "json")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
-    pub fn json<T: Serialize + ?Sized>(mut self, json: &T) -> RequestBuilder {
-        let mut error = None;
-        if let Ok(ref mut req) = self.request {
-            match serde_json::to_vec(json) {
-                Ok(body) => {
-                    req.headers_mut()
-                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                    *req.body_mut() = Some(body.into());
-                }
-                Err(err) => error = Some(crate::error::builder(err)),
-            }
-        }
-        if let Some(err) = error {
-            self.request = Err(err);
-        }
-        self
-    }
-
     /// Disable CORS on fetching the request.
     ///
     /// # WASM
@@ -852,7 +820,7 @@ impl<'a> PendingRequest<'a> {
                             self.req.url.clone(),
                         );
                         let mut req = req.clone();
-                        req.headers = headers;
+                        req.headers = headers.clone();
 
                         // Add cookies from the cookie store.
                         #[cfg(feature = "cookies")]

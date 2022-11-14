@@ -7,11 +7,7 @@ use bytes::Bytes;
 use encoding_rs::{Encoding, UTF_8};
 use http::{HeaderMap, HeaderValue, StatusCode};
 use mime::Mime;
-#[cfg(feature = "json")]
-use serde::de::DeserializeOwned;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-#[cfg(feature = "json")]
-use serde_json;
 use url::Url;
 
 #[cfg(feature = "cookies")]

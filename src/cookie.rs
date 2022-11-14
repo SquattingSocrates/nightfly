@@ -1,18 +1,36 @@
 //! HTTP Cookies
 
-use std::collections::HashMap;
+use std::convert::TryInto;
 use std::fmt;
+use std::sync::RwLock;
 use std::time::SystemTime;
-use std::{collections::HashSet, convert::TryInto};
 
 use crate::header::{HeaderValue, SET_COOKIE};
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-use url::Url;
+use http::HeaderMap;
 
-#[derive(Clone, Serialize, Deserialize)]
+/// Actions for a persistent cookie store providing session support.
+pub trait CookieStore: Send + Sync {
+    /// Store a set of Set-Cookie header values received from `url`
+    fn set_cookies(&self, cookie_headers: &mut dyn Iterator<Item = &HeaderValue>, url: &url::Url);
+    /// Get any Cookie values in the store for `url`
+    fn cookies(&self, url: &url::Url) -> Option<HeaderValue>;
+}
+
 /// A single HTTP cookie.
 pub struct Cookie<'a>(cookie_crate::Cookie<'a>);
+
+/// A good default `CookieStore` implementation.
+///
+/// This is the implementation used when simply calling `cookie_store(true)`.
+/// This type is exposed to allow creating one and filling it with some
+/// existing cookies more easily, before creating a `Client`.
+///
+/// For more advanced scenarios, such as needing to serialize the store or
+/// manipulate it between requests, you may refer to the
+/// [reqwest_cookie_store crate](https://crates.io/crates/reqwest_cookie_store).
+#[derive(Debug, Default)]
+pub struct Jar(RwLock<cookie_store::CookieStore>);
 
 // ===== impl Cookie =====
 
@@ -89,13 +107,13 @@ impl<'a> fmt::Debug for Cookie<'a> {
 }
 
 pub(crate) fn extract_response_cookie_headers<'a>(
-    headers: &'a http::HeaderMap,
+    headers: &'a HeaderMap,
 ) -> impl Iterator<Item = &'a HeaderValue> + 'a {
     headers.get_all(SET_COOKIE).iter()
 }
 
 pub(crate) fn extract_response_cookies<'a>(
-    headers: &'a http::HeaderMap,
+    headers: &'a HeaderMap,
 ) -> impl Iterator<Item = Result<Cookie<'a>, CookieParseError>> + 'a {
     headers
         .get_all(SET_COOKIE)
@@ -120,89 +138,55 @@ impl<'a> fmt::Display for CookieParseError {
 
 impl std::error::Error for CookieParseError {}
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CookieJar(HashMap<Url, cookie_crate::CookieJar>);
+// ===== impl Jar =====
 
-// ===== impl CookieJar =====
+impl Jar {
+    /// Add a cookie to this jar.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use reqwest::{cookie::Jar, Url};
+    ///
+    /// let cookie = "foo=bar; Domain=yolo.local";
+    /// let url = "https://yolo.local".parse::<Url>().unwrap();
+    ///
+    /// let jar = Jar::default();
+    /// jar.add_cookie_str(cookie, &url);
+    ///
+    /// // and now add to a `ClientBuilder`?
+    /// ```
+    pub fn add_cookie_str(&self, cookie: &str, url: &url::Url) {
+        let cookies = cookie_crate::Cookie::parse(cookie)
+            .ok()
+            .map(|c| c.into_owned())
+            .into_iter();
+        self.0.write().unwrap().store_response_cookies(cookies, url);
+    }
+}
 
-// impl CookieJar {
-//     /// Add a cookie to this jar.
-//     ///
-//     /// # Example
-//     ///
-//     /// ```
-//     /// use nightfly::{cookie::CookieJar, Url};
-//     ///
-//     /// let cookie = "foo=bar; Domain=yolo.local";
-//     /// let url = "https://yolo.local".parse::<Url>().unwrap();
-//     ///
-//     /// let jar = CookieJar::default();
-//     /// jar.add_cookie_str(cookie, &url);
-//     ///
-//     /// // and now add to a `ClientBuilder`?
-//     /// ```
-//     pub fn add_cookie_str(&self, cookie: &str, url: &url::Url) {
-//         let cookies = cookie_crate::Cookie::parse(cookie)
-//             .ok()
-//             .map(|c| c.into_owned())
-//             .into_iter();
-//         self.store_response_cookies(cookies, url);
-//     }
+impl CookieStore for Jar {
+    fn set_cookies(&self, cookie_headers: &mut dyn Iterator<Item = &HeaderValue>, url: &url::Url) {
+        let iter =
+            cookie_headers.filter_map(|val| Cookie::parse(val).map(|c| c.0.into_owned()).ok());
 
-//     fn get_store(&mut self, url: &url::Url) -> &mut cookie_crate::CookieJar {
-//         self.0.entry(url.clone()).or_default()
-//     }
+        self.0.write().unwrap().store_response_cookies(iter, url);
+    }
 
-//     pub fn set_cookies(
-//         &self,
-//         cookie_headers: &mut dyn Iterator<Item = &HeaderValue>,
-//         url: &url::Url,
-//     ) {
-//         let iter =
-//             cookie_headers.filter_map(|val| Cookie::parse(val).map(|c| c.0.into_owned()).ok());
+    fn cookies(&self, url: &url::Url) -> Option<HeaderValue> {
+        let s = self
+            .0
+            .read()
+            .unwrap()
+            .get_request_values(url)
+            .map(|(name, value)| format!("{}={}", name, value))
+            .collect::<Vec<_>>()
+            .join("; ");
 
-//         self.0.store_response_cookies(iter, url);
-//     }
+        if s.is_empty() {
+            return None;
+        }
 
-//     pub fn cookies(&self, url: &url::Url) -> Option<HeaderValue> {
-//         let s = self
-//             .0
-//             .get_request_values(url)
-//             .map(|(name, value)| format!("{}={}", name, value))
-//             .collect::<Vec<_>>()
-//             .join("; ");
-
-//         if s.is_empty() {
-//             return None;
-//         }
-
-//         HeaderValue::from_maybe_shared(Bytes::from(s)).ok()
-//     }
-
-//     /// Store the `cookies` received from `url`
-//     pub fn store_response_cookies<I: Iterator<Item = Cookie<'static>>>(
-//         &mut self,
-//         cookies: I,
-//         url: &Url,
-//     ) {
-//         let store = self.get_store(url);
-//         for cookie in cookies {
-//             if cookie.secure() != Some(true) || cfg!(feature = "log_secure_cookie_values") {
-//                 lunatic_log::debug!("inserting Set-Cookie '{:?}'", cookie);
-//             } else {
-//                 lunatic_log::debug!("inserting secure cookie '{}'", cookie.name());
-//             }
-
-//             if let Err(e) = store.add(cookie.clone()) {
-//                 lunatic_log::debug!("unable to store Set-Cookie: {:?}", e);
-//             }
-//         }
-//     }
-
-//     /// Return an `Iterator` of the cookie (`name`, `value`) pairs for `url` in the store, suitable
-//     /// for use in the `Cookie` header of an HTTP request. For iteration over `Cookie` instances,
-//     /// please refer to [`CookieStore::matches`].
-//     pub fn get_request_values(&self, url: &Url) -> impl Iterator<Item = (&str, &str)> {
-//         self.0.iter().filter(|cookie| cookie.).matches(url).into_iter().map(|c| c.name_value())
-//     }
-// }
+        HeaderValue::from_maybe_shared(Bytes::from(s)).ok()
+    }
+}

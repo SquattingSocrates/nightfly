@@ -98,7 +98,6 @@
 //! # use nightfly::Error;
 //! # use std::collections::HashMap;
 //! #
-//! # #[cfg(feature = "json")]
 //! # fn run() -> Result<(), Error> {
 //! // This will POST a body of `{"lang":"rust","body":"json"}`
 //! let mut map = HashMap::new();
