@@ -247,8 +247,8 @@ fn _assert_impls() {
 // #[cfg(test)]
 // doctest!("../README.md");
 
-#[cfg(feature = "multipart")]
-pub use self::lunatic_impl::multipart;
+// #[cfg(feature = "multipart")]
+// pub use self::lunatic_impl::multipart;
 pub use self::lunatic_impl::{
     Body, Client, ClientBuilder, HttpResponse, Request, RequestBuilder, SerializableResponse,
 };

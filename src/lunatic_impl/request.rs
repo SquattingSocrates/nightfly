@@ -11,8 +11,8 @@ use http::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use super::client::InnerClient;
-#[cfg(feature = "multipart")]
-use super::multipart;
+// #[cfg(feature = "multipart")]
+// use super::multipart;
 use super::response::HttpResponse;
 #[cfg(feature = "cookies")]
 use crate::cookie::{self, CookieStore};
@@ -375,43 +375,43 @@ impl RequestBuilder {
         self
     }
 
-    /// Sends a multipart/form-data body.
-    ///
-    /// ```
-    /// # use nightfly::Error;
-    ///
-    /// # fn run() -> Result<(), Error> {
-    /// let client = nightfly::Client::new();
-    /// let form = nightfly::multipart::Form::new()
-    ///     .text("key3", "value3")
-    ///     .text("key4", "value4");
-    ///
-    ///
-    /// let response = client.post("your url")
-    ///     .multipart(form)
-    ///     .send()
-    ///     ;
-    /// # Ok(())
-    /// # }
-    /// ```
-    #[cfg(feature = "multipart")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "multipart")))]
-    pub fn multipart(self, mut multipart: multipart::Form) -> RequestBuilder {
-        let mut builder = self.header(
-            CONTENT_TYPE,
-            format!("multipart/form-data; boundary={}", multipart.boundary()).as_str(),
-        );
+    // /// Sends a multipart/form-data body.
+    // ///
+    // /// ```
+    // /// # use nightfly::Error;
+    // ///
+    // /// # fn run() -> Result<(), Error> {
+    // /// let client = nightfly::Client::new();
+    // /// let form = nightfly::multipart::Form::new()
+    // ///     .text("key3", "value3")
+    // ///     .text("key4", "value4");
+    // ///
+    // ///
+    // /// let response = client.post("your url")
+    // ///     .multipart(form)
+    // ///     .send()
+    // ///     ;
+    // /// # Ok(())
+    // /// # }
+    // /// ```
+    // #[cfg(feature = "multipart")]
+    // #[cfg_attr(docsrs, doc(cfg(feature = "multipart")))]
+    // pub fn multipart(self, mut multipart: multipart::Form) -> RequestBuilder {
+    //     let mut builder = self.header(
+    //         CONTENT_TYPE,
+    //         format!("multipart/form-data; boundary={}", multipart.boundary()).as_str(),
+    //     );
 
-        builder = match multipart.compute_length() {
-            Some(length) => builder.header(CONTENT_LENGTH, length),
-            None => builder,
-        };
+    //     builder = match multipart.compute_length() {
+    //         Some(length) => builder.header(CONTENT_LENGTH, length),
+    //         None => builder,
+    //     };
 
-        if let Ok(ref mut req) = builder.request {
-            *req.body_mut() = Some(multipart.stream())
-        }
-        builder
-    }
+    //     if let Ok(ref mut req) = builder.request {
+    //         *req.body_mut() = Some(multipart.stream())
+    //     }
+    //     builder
+    // }
 
     /// Modify the query string of the URL.
     ///

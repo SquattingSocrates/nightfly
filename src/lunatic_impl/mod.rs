@@ -8,8 +8,8 @@ pub mod body;
 pub mod client;
 pub mod decoder;
 mod http_stream;
-#[cfg(feature = "multipart")]
-pub mod multipart;
+// #[cfg(feature = "multipart")]
+// pub mod multipart;
 pub(crate) mod request;
 mod response;
 // mod upgrade;

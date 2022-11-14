@@ -25,7 +25,7 @@ features = [
 cookies = ["cookie_crate", "cookie_store", "proc-macro-hack"]
 default = []
 
-multipart = ["mime_guess"]
+# multipart = ["mime_guess"]
 
 [dependencies]
 base64 = "0.13"
