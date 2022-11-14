@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::{Cursor, Read};
+use std::io::Read;
 use std::{convert::TryFrom, str::FromStr};
 
 use flate2::read::{GzDecoder, ZlibDecoder};

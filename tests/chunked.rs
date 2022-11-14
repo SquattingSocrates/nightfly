@@ -60,7 +60,7 @@ static DEFLATE_CHUNKED: [u8; 40] = [
     b'\r', b'\n',
 ];
 
-fn chunked(req: RequestContext) -> SubmsResponse {
+fn chunked() -> SubmsResponse {
     SubmsResponse::builder()
         .header("Transfer-Encoding", "chunked")
         .header("Content-Length", "24")
