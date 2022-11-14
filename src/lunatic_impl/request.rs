@@ -129,7 +129,7 @@ impl Request {
     #[inline]
     pub fn new(method: Method, url: Url) -> Self {
         Request {
-            method: method,
+            method,
             url,
             headers: HeaderMap::new(),
             body: None,
@@ -276,7 +276,7 @@ impl RequestBuilder {
     /// The headers will be merged in to any already set.
     pub fn headers(mut self, headers: crate::header::HeaderMap) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {
-            crate::util::replace_headers(&mut req.headers_mut(), headers);
+            crate::util::replace_headers(req.headers_mut(), headers);
         }
         self
     }
@@ -792,7 +792,7 @@ impl<'a> PendingRequest<'a> {
                     }
                 }
                 let url = self.req.url.clone();
-                self.urls.push(url.clone());
+                self.urls.push(url);
                 let action = self
                     .client
                     .redirect_policy
@@ -814,12 +814,11 @@ impl<'a> PendingRequest<'a> {
                         self.req.url = loc;
 
                         remove_sensitive_headers(&mut headers, &self.req.url, &self.urls);
-                        let req = Request::new(
+                        let mut req = Request::new(
                             // it's fine to unwrap here because the method was constructed with a valid builder
                             Method::from_str(self.req.method.as_str()).unwrap(),
                             self.req.url.clone(),
                         );
-                        let mut req = req.clone();
                         req.headers = headers.clone();
 
                         // Add cookies from the cookie store.

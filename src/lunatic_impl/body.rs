@@ -5,51 +5,51 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Debug, Serialize, Deserialize, Clone)]
 pub struct Body(Vec<u8>);
 
-impl Into<Body> for String {
-    fn into(self) -> Body {
-        Body(self.into())
+impl From<String> for Body {
+    fn from(s: String) -> Body {
+        Body(s.into())
     }
 }
 
-impl Into<Body> for &str {
-    fn into(self) -> Body {
-        Body(self.into())
+impl From<&str> for Body {
+    fn from(s: &str) -> Body {
+        Body(s.into())
     }
 }
 
-impl Into<Body> for Bytes {
-    fn into(self) -> Body {
-        Body(self.into())
+impl From<Bytes> for Body {
+    fn from(b: Bytes) -> Body {
+        Body(b.into())
     }
 }
 
-impl Into<Body> for Vec<u8> {
-    fn into(self) -> Body {
-        Body(self)
+impl From<Vec<u8>> for Body {
+    fn from(v: Vec<u8>) -> Body {
+        Body(v)
     }
 }
 
-impl Into<Body> for &[u8] {
-    fn into(self) -> Body {
-        Body(self.into())
+impl From<&[u8]> for Body {
+    fn from(slice: &[u8]) -> Body {
+        Body(slice.into())
     }
 }
 
-impl Into<Body> for () {
-    fn into(self) -> Body {
+impl From<()> for Body {
+    fn from(_: ()) -> Body {
         Body::empty()
     }
 }
 
-impl Into<Body> for HttpResponse {
-    fn into(self) -> Body {
-        self.body.into()
+impl From<HttpResponse> for Body {
+    fn from(body: HttpResponse) -> Self {
+        body.into()
     }
 }
 
-impl Into<Bytes> for Body {
-    fn into(self) -> Bytes {
-        Bytes::from(self.0)
+impl From<Body> for Bytes {
+    fn from(body: Body) -> Bytes {
+        Bytes::from(body.0)
     }
 }
 
@@ -70,6 +70,11 @@ impl Body {
     /// length of body
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// tells whether body is empty
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     /// retrieve body

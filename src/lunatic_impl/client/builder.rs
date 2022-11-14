@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     convert::TryInto,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
     time::Duration,
 };
 
@@ -339,7 +338,7 @@ impl ClientBuilder {
             referer: config.referer,
             request_timeout: config.timeout,
             // proxies,
-            proxies_maybe_http_auth: false,
+            // proxies_maybe_http_auth: false,
             https_only: config.https_only,
             stream_map: HashMap::new(),
         })

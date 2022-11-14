@@ -4,11 +4,14 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 
 ## What works:
 
-* [x] (de)compression with brotli, gzip and deflate
+* [x] json, text and bytes for request and response bodies
+* [x] decompression with brotli, gzip and deflate
 * [x] redirect handling
-* [x] cookies and caching
-* [ ] timeouts
+* [x] cookies
 * [x] chunked responses
+* [x] handling of multiple open tcp streams per client
+* [ ] timeouts (not sure how this should look like in a lunatic setup)
+* [ ] pooling of connections (needs more usage of lib to find a good approach)
 * [ ] proxy handling
 * [ ] upgrade, socks5 support and websockets
 * [ ] custom dns resolver

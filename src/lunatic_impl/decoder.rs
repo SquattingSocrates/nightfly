@@ -319,7 +319,7 @@ impl HttpBodyReader {
             .iter()
             .filter_map(|header| {
                 String::from_utf8(header.as_bytes().to_vec())
-                    .map(|s| Some(s))
+                    .map(Some)
                     .unwrap_or(None)
             })
             .collect()
@@ -344,7 +344,7 @@ impl HttpBodyReader {
             || (method == http::Method::GET && self.should_close_conn() && !self.is_chunked())
             || status == http::StatusCode::NO_CONTENT
             || status == http::StatusCode::NOT_MODIFIED
-            || (status_num >= 100 && status_num < 200)
+            || (100..200).contains(&status_num)
     }
 
     // simply load a bit more data from the underlying stream
@@ -403,7 +403,7 @@ impl HttpBodyReader {
             buf[idx] = *byte;
         }
         self.chunk_offset += len_read;
-        return Ok(len_read);
+        Ok(len_read)
     }
 
     fn skip_clrf(&mut self) -> std::io::Result<()> {
@@ -416,7 +416,7 @@ impl HttpBodyReader {
         }
         // in any case we need to "skip" the clrf tokens at the end of the chunk
         self.offset += 2;
-        return Ok(());
+        Ok(())
     }
 }
 

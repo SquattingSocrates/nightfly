@@ -126,6 +126,3 @@ path = "tests/chunked.rs"
 # name = "multipart"
 # path = "tests/multipart.rs"
 # required-features = ["multipart"]
-
-[rust-analyzer.cargo]
-features = ["deflate"]

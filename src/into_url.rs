@@ -53,7 +53,7 @@ impl<'a> IntoUrlSealed for &'a String {
     }
 }
 
-impl<'a> IntoUrlSealed for String {
+impl IntoUrlSealed for String {
     fn into_url(self) -> crate::Result<Url> {
         (&*self).into_url()
     }
@@ -63,11 +63,11 @@ impl<'a> IntoUrlSealed for String {
     }
 }
 
-pub(crate) fn expect_uri(url: &Url) -> http::Uri {
-    url.as_str()
-        .parse()
-        .expect("a parsed Url should always be a valid Uri")
-}
+// pub(crate) fn expect_uri(url: &Url) -> http::Uri {
+//     url.as_str()
+//         .parse()
+//         .expect("a parsed Url should always be a valid Uri")
+// }
 
 pub(crate) fn try_uri(url: &Url) -> Option<http::Uri> {
     url.as_str().parse().ok()
