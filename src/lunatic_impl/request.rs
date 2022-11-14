@@ -896,15 +896,11 @@ fn make_referer(next: &Url, previous: &Url) -> Option<HeaderValue> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Body, Client};
+    use crate::Client;
 
-    use http::{header, HeaderValue, Method};
+    use http::{HeaderValue, Method};
     use serde::Serialize;
     use std::collections::BTreeMap;
-    use std::convert::TryInto;
-    use std::io::Read;
-    use std::str::Utf8Error;
-    use std::string::FromUtf8Error;
 
     #[lunatic::test]
     fn add_query_append() {
@@ -1103,7 +1099,6 @@ mod tests {
     }
 
     use serde_json;
-    use serde_urlencoded;
     use std::collections::HashMap;
 
     #[lunatic::test]

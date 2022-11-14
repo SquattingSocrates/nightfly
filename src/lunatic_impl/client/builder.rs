@@ -340,7 +340,7 @@ impl ClientBuilder {
             // proxies,
             proxies_maybe_http_auth: false,
             https_only: config.https_only,
-            stream: None,
+            stream_map: HashMap::new(),
         })
     }
 

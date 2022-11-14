@@ -1,5 +1,4 @@
-#[cfg(any(feature = "native-tls", feature = "__rustls",))]
-use std::any::Any;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::io::Write;
@@ -31,12 +30,6 @@ use crate::lunatic_impl::{
     response::HttpResponse,
 };
 use crate::redirect;
-#[cfg(feature = "__tls")]
-use crate::tls::{self, TlsBackend};
-#[cfg(feature = "__tls")]
-use crate::Certificate;
-#[cfg(any(feature = "native-tls", feature = "__rustls"))]
-use crate::Identity;
 use crate::{Body, ClientBuilder};
 use crate::{IntoUrl, Method, Url};
 
@@ -52,7 +45,7 @@ pub struct InnerClient {
     // pub(crate) proxies: Arc<Vec<Proxy>>,
     pub(crate) proxies_maybe_http_auth: bool,
     pub(crate) https_only: bool,
-    pub(crate) stream: Option<HttpStream>,
+    pub(crate) stream_map: HashMap<HostRef, HttpStream>,
 }
 
 /// encode request as http text
@@ -255,23 +248,33 @@ impl Client {
     }
 }
 
+#[derive(Debug, Serialize, Clone, Deserialize, Hash, PartialEq, Eq)]
+pub(crate) enum HostRef {
+    Http(String),
+    Https(String),
+}
+
+impl HostRef {
+    pub(crate) fn new(url: &Url) -> Self {
+        let protocol = url.scheme();
+        if protocol == "https" {
+            return HostRef::Https(format!("{}", url.host().unwrap()));
+        }
+        let conn_str = format!("{}:{}", url.host().unwrap(), url.port().unwrap_or(80));
+        HostRef::Http(conn_str)
+    }
+}
+
 impl InnerClient {
-    // pub(crate) fn execute(&mut self, request: InnerRequest) -> Result<HttpResponse, crate::Error> {
-    //     self.execute_request(request, vec![])
-    // }
-
-    // pub(crate) fn builder() -> ClientBuilder {
-    //     ClientBuilder::new()
-    // }
-
     pub(crate) fn accepts(&self) -> Accepts {
         self.accepts.clone()
     }
 
     /// ensures connection
     pub fn ensure_connection(&mut self, url: Url) -> crate::Result<HttpStream> {
-        if let Some(stream) = &self.stream {
-            return Ok(stream.clone());
+        let host_ref = HostRef::new(&url);
+        if let Some(stream) = &self.stream_map.get(&host_ref) {
+            return Ok(stream.clone().to_owned());
         }
         HttpStream::connect(url)
     }
@@ -364,8 +367,8 @@ impl InnerClient {
             body,
             version.try_into().unwrap(),
         );
-        println!(
-            "GOT HEADERS {:?} | ENCODED REQUEST {:?}",
+        lunatic_log::debug!(
+            "Encoded headers {:?} | Encoded request {:?}",
             headers,
             String::from_utf8(encoded.clone())
         );

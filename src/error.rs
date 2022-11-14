@@ -246,9 +246,9 @@ pub(crate) fn serialization<E: Into<BoxError>>(e: E) -> Error {
     Error::new(Kind::Serialization, Some(e))
 }
 
-pub(crate) fn body<E: Into<BoxError>>(e: E) -> Error {
-    Error::new(Kind::Body, Some(e))
-}
+// pub(crate) fn body<E: Into<BoxError>>(e: E) -> Error {
+//     Error::new(Kind::Body, Some(e))
+// }
 
 pub(crate) fn decode<E: Into<BoxError>>(e: E) -> Error {
     Error::new(Kind::Decode, Some(e))

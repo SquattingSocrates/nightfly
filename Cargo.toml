@@ -123,6 +123,10 @@ path = "tests/brotli.rs"
 name = "deflate"
 path = "tests/deflate.rs"
 
+[[test]]
+name = "chunked"
+path = "tests/chunked.rs"
+
 # [[test]]
 # name = "multipart"
 # path = "tests/multipart.rs"

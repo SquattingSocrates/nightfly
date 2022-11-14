@@ -1,5 +1,5 @@
 use std::fmt;
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::{convert::TryFrom, str::FromStr};
 
 use flate2::read::{GzDecoder, ZlibDecoder};
@@ -91,19 +91,9 @@ impl Decoder {
         if let MessageEncoding::Octets = self.encoding {
             let reader = &mut self.reader;
             let body = if let Some(content_length) = reader.content_length() {
-                #[allow(clippy::comparison_chain)]
-                if reader.response_buffer[reader.offset..].len() == content_length {
-                    // Complete content is captured from the response w/o trailing pipelined
-                    // responses.
-                    reader.response_buffer[reader.offset..].to_owned()
-                } else {
-                    // Read the rest from TCP stream to form a full response
-                    let rest = content_length - reader.response_buffer[reader.offset..].len();
-                    let mut buffer = vec![0u8; rest];
-                    reader.stream.read_exact(&mut buffer).unwrap();
-                    reader.response_buffer.extend(&buffer);
-                    reader.response_buffer[reader.offset..].to_owned()
-                }
+                let mut body = vec![0u8; content_length];
+                reader.read_exact(&mut body).unwrap();
+                body
             } else if reader.no_content_length_required() {
                 vec![]
             } else {
@@ -119,6 +109,7 @@ impl Decoder {
                 url: reader.req.url.clone(),
             };
         }
+
         let buf = if !self.reader.no_content_length_required() {
             match &self.encoding {
                 MessageEncoding::Brotli => {
@@ -131,6 +122,7 @@ impl Decoder {
                     let mut decoder = GzDecoder::new(&mut self.reader);
                     let mut buf = Vec::new();
                     let _ = decoder.read_to_end(&mut buf).unwrap();
+                    // end_buf
                     buf
                 }
                 MessageEncoding::Deflate => {
@@ -265,10 +257,7 @@ pub(crate) fn parse_response(
         }
     };
 
-    lunatic_log::debug!(
-        "Received RAW Response {:?}",
-        String::from_utf8(response_buffer.clone())
-    );
+    lunatic_log::debug!("Received RAW Response {:?}", response_raw);
 
     // At this point one full response header is available, but the body (if it
     // exists) might not be fully loaded yet.
@@ -352,10 +341,21 @@ impl HttpBodyReader {
         let status = self.res.status();
         let status_num = status.as_u16();
         method == http::Method::HEAD
-            || (method == http::Method::GET && self.should_close_conn())
+            || (method == http::Method::GET && self.should_close_conn() && !self.is_chunked())
             || status == http::StatusCode::NO_CONTENT
             || status == http::StatusCode::NOT_MODIFIED
             || (status_num >= 100 && status_num < 200)
+    }
+
+    // simply load a bit more data from the underlying stream
+    // because the parser is probably missing some data from the buffer
+    fn load_more(&mut self) -> std::io::Result<usize> {
+        // start reading from tcp stream
+        let mut next_batch = vec![0u8; 1000];
+        let read_size = self.stream.read(&mut next_batch)?;
+        self.response_buffer
+            .extend(next_batch[..read_size].to_vec());
+        Ok(read_size)
     }
 
     fn inner_read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -368,8 +368,9 @@ impl HttpBodyReader {
             );
             // start reading from tcp stream
             let mut next_batch = vec![0u8; buf.len()];
-            self.stream.read(&mut next_batch)?;
-            self.response_buffer.extend(next_batch);
+            let read_size = self.stream.read(&mut next_batch)?;
+            self.response_buffer
+                .extend(next_batch[..read_size].to_vec());
         }
         let mut len_read = 0;
         for (idx, byte) in self.response_buffer[self.offset..].iter().enumerate() {
@@ -385,9 +386,9 @@ impl HttpBodyReader {
 
     fn read_chunk(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         lunatic_log::debug!(
-            "Reading from chunked body: chunk_offset {} | chunk_body: {:?}",
+            "Reading from chunked body: chunk_offset {} | len {}",
             self.chunk_offset,
-            self.chunk_body
+            self.chunk_body.len(),
         );
         if self.chunk_offset >= self.chunk_body.len() {
             // start reading from tcp stream
@@ -404,9 +405,39 @@ impl HttpBodyReader {
         self.chunk_offset += len_read;
         return Ok(len_read);
     }
+
+    fn skip_clrf(&mut self) -> std::io::Result<()> {
+        // if the clrf of the chunk is not yet in the response
+        // buffer we need to load the data first
+        if self.response_buffer.len() - self.offset < 2 {
+            let mut clrf = [0u8; REQUEST_BUFFER_SIZE];
+            let len = self.stream.read(&mut clrf)?;
+            self.response_buffer.extend(clrf[..len].to_vec());
+        }
+        // in any case we need to "skip" the clrf tokens at the end of the chunk
+        self.offset += 2;
+        return Ok(());
+    }
 }
 
 impl Read for HttpBodyReader {
+    // fn read_to_end(&mut self, buf: &mut Vec<u8>) -> std::io::Result<usize> {
+    //     let mut read_buf = [0u8; REQUEST_BUFFER_SIZE];
+    //     let mut read_size = 0;
+    //     loop {
+    //         match self.read(&mut read_buf) {
+    //             Ok(num) => {
+    //                 if num == 0 {
+    //                     return Ok(read_size);
+    //                 }
+    //                 read_size += num;
+    //                 buf.extend(read_buf[..num].to_vec());
+    //             }
+    //             Err(e) =>
+    //         }
+    //     }
+    // }
+
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.is_chunked() {
             // if we're done with reading the chunked data
@@ -424,32 +455,39 @@ impl Read for HttpBodyReader {
                     // this means that the next chunk of size `size` starts from `idx`
                     Ok(Status::Complete((idx, size))) => {
                         // first, we need to consume the size and CRLF bytes
-                        self.offset += idx;
-
-                        if size == 0 && self.response_buffer[self.offset..].starts_with(b"\r\n") {
+                        if size == 0
+                            && self.response_buffer[self.offset + idx..].starts_with(b"\r\n")
+                        {
                             // break because the reading has been completed and
                             // the whole response body has been written into `self.chunk_body`
+                            self.skip_clrf()?;
                             return self.read_chunk(buf);
                         }
+
+                        self.offset += idx;
 
                         // now that we skipped the prefix we can consume the rest from
                         // either the `response_buffer` or the `stream` in case the response_buffer
                         // does not yet have all the data
-                        let mut chunk = vec![0u8; size as usize];
-                        let mut read_chunk_size = self.inner_read(&mut chunk)?;
-                        self.chunk_body.extend(chunk);
+                        let mut read_from_chunk = 0;
 
-                        // not done reading current chunk, need to finish current chunk
-                        while read_chunk_size < size as usize {
-                            let mut chunk = vec![0u8; size as usize - read_chunk_size];
-                            read_chunk_size = read_chunk_size + self.inner_read(&mut chunk)?;
-                            self.chunk_body.extend(chunk);
+                        // not done reading current chunk from tcp/tls stream
+                        //need to finish reading by moving data from response_buffer
+                        // into `self.chunk_body`
+                        while read_from_chunk < size as usize {
+                            let mut chunk = vec![0u8; size as usize - read_from_chunk];
+                            let read_chunk_size = self.inner_read(&mut chunk)?;
+                            read_from_chunk += read_chunk_size;
+                            self.chunk_body.extend(chunk[..read_chunk_size].to_vec());
                         }
+                        // skip CRLF tokens
+                        self.skip_clrf()?;
                     }
+                    // partial in this context means that the chunk header
+                    // was not fully read, meaning that we need to attempt to read
+                    // from the tcp/tls stream in order to get the rest of the chunk header
                     Ok(Status::Partial) => {
-                        let mut buf = vec![0u8; REQUEST_BUFFER_SIZE];
-                        let n = self.stream.read(&mut buf).unwrap();
-                        self.response_buffer.extend(&buf[..n]);
+                        let _size = self.load_more()?;
                     }
                     Err(_) => {
                         return Err(std::io::Error::new(

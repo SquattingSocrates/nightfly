@@ -103,7 +103,6 @@ impl Read for Body {
 use std::{
     convert::TryInto,
     io::{Cursor, Read},
-    str::Utf8Error,
     string::FromUtf8Error,
 };
 
