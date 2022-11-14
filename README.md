@@ -16,7 +16,7 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 <!-- [![crates.io](https://img.shields.io/crates/v/nightfly.svg)](https://crates.io/crates/nightfly) -->
 <!-- [![Documentation](https://docs.rs/nightfly/badge.svg)](https://docs.rs/nightfly) -->
 [![MIT/Apache-2 licensed](https://img.shields.io/crates/l/nightfly.svg)](./LICENSE-APACHE)
-<!-- [![CI](https://github.com/seanmonstar/nightfly/workflows/CI/badge.svg)](https://github.com/seanmonstar/nightfly/actions?query=workflow%3ACI) -->
+[![CI](https://github.com/SquattingSocrates/nightfly/workflows/CI/badge.svg)](https://github.com/SquattingSocrates/nightfly/actions?query=workflow%3ACI)
 
 An ergonomic, batteries-included HTTP Client for the lunatic runtime written in Rust.
 
