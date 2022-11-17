@@ -12,16 +12,14 @@
 //! It handles many of the things that most people just expect an HTTP client
 //! to do for them.
 //!
-//! - Async and [blocking](blocking) Clients
-//! - Plain bodies, [JSON](#json), [urlencoded](#forms), [multipart](multipart)
+//! - Reusable, cloneable and serialisable Clients
+//! - Plain bodies, [JSON](#json), [urlencoded](#forms)
 //! - Customizable [redirect policy](#redirect-policies)
-//! - HTTP [Proxies](#proxies)
-//! - Uses system-native [TLS](#tls)
+//! - Uses vm-native [TLS]
 //! - Cookies
 //!
 //! Additional learning resources include:
 //!
-//! - [The Rust Cookbook](https://rust-lang-nursery.github.io/rust-cookbook/web/clients.html)
 //! - [Nightfly Repository Examples](https://github.com/SquattingSocrates/nightfly/tree/master/examples)
 //!
 //! ## Making a GET request
