@@ -25,11 +25,11 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 An ergonomic, batteries-included HTTP Client for the lunatic runtime written in Rust.
 
 - Plain bodies, JSON, urlencoded, multipart (see examples)
-- Customizable redirect policy (IN PROGRESS)
-- HTTP Proxies (IN PROGRESS)
+- Redirects with different policies
 - HTTPS via lunatic-native TLS (see examples)
-- Cookie Store (IN PROGRESS)
-- [Changelog](CHANGELOG.md)
+- Cookie Store
+- Customizable function-based redirect policy (IN PROGRESS)
+- HTTP Proxies (IN PROGRESS)
 
 
 ## Example
