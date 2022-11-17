@@ -37,7 +37,11 @@ pub struct SerializableResponse {
     /// The response's headers as hashmap from Headermap
     pub headers: HashMap<String, Vec<String>>,
 
-    pub(super) url: Url,
+    /// url of where the final response came from
+    /// in case any redirects happened
+    pub url: Url,
+    /// list of urls hopped during redirects
+    pub redirect_chain: Vec<Url>,
     // pub info: HttpInfo,
 }
 
@@ -51,6 +55,7 @@ impl TryFrom<SerializableResponse> for HttpResponse {
             version: res.version,
             headers: header_map_from_hashmap(res.headers),
             url: res.url,
+            redirect_chain: res.redirect_chain,
         })
     }
 }
@@ -68,7 +73,11 @@ pub struct HttpResponse {
     /// The response's headers
     pub headers: HeaderMap<HeaderValue>,
 
-    pub(super) url: Url,
+    /// url of response
+    pub url: Url,
+
+    /// chain of urls if any redirection happened
+    pub redirect_chain: Vec<Url>,
     // pub info: HttpInfo,
 }
 
@@ -118,7 +127,7 @@ impl HttpResponse {
     /// This requires the optional `cookies` feature to be enabled.
     #[cfg(feature = "cookies")]
     #[cfg_attr(docsrs, doc(cfg(feature = "cookies")))]
-    pub fn cookies<'a>(&'a self) -> impl Iterator<Item = cookie::Cookie<'a>> + 'a {
+    pub fn cookies(&self) -> impl Iterator<Item = cookie::Cookie> {
         cookie::extract_response_cookies(self.headers()).filter_map(Result::ok)
     }
 

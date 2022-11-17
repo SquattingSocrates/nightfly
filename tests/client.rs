@@ -47,7 +47,7 @@ fn get_handler() -> SubmsResponse {
 }
 
 fn pipe_response(body: Vec<u8>, _headers: HeaderMap) -> SubmsResponse {
-    // println!("")
+    lunatic_log::info!("BODY {:?} | header {:?}", body, _headers);
     // assert_eq!(headers["transfer-encoding"], "chunked");
 
     assert_eq!(body, b"pipe me".to_vec());
@@ -163,6 +163,8 @@ fn body_pipe_response() {
 
     assert_eq!(res1.status(), nightfly::StatusCode::OK);
     assert_eq!(res1.content_length(), Some(7));
+
+    println!("GOT THIS RES1 {:?}", res1.body());
 
     // and now ensure we can "pipe" the response to another request
     let res2 = client

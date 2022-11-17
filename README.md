@@ -11,6 +11,7 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 * [x] chunked responses
 * [x] handling of multiple open tcp streams per client
 * [ ] timeouts (not sure how this should look like in a lunatic setup)
+* [ ] Piping of responses (requires chunk-encoding)
 * [ ] pooling of connections (needs more usage of lib to find a good approach)
 * [ ] proxy handling
 * [ ] upgrade, socks5 support and websockets
@@ -38,8 +39,8 @@ optional features, so your `Cargo.toml` could look like this:
 
 ```toml
 [dependencies]
-nightfly = { git = "https://github.com/SquattingSocrates/nightfly" }
-lunatic = { git = "https://github.com/lunatic-solutions/lunatic-rs" }
+nightfly = { "0.1.0" }
+lunatic = { "0.12.0" }
 ```
 
 And then the code:

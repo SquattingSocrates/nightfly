@@ -23,7 +23,7 @@ features = [
 
 [features]
 cookies = ["cookie_crate", "cookie_store", "proc-macro-hack"]
-default = []
+default = ["cookies"]
 
 # multipart = ["mime_guess"]
 
@@ -35,8 +35,8 @@ http = "0.2"
 http-body = "0.4.5"
 httparse = "1.7.1"
 ipnet = "2.5.0"
-lunatic = {git = "https://github.com/lunatic-solutions/lunatic-rs"}
-lunatic-log = "0.2"
+lunatic = "0.12.0"
+lunatic-log = "0.3"
 mime = "0.3.16"
 percent-encoding = "2.2.0"
 serde = "1.0"
@@ -67,7 +67,7 @@ trust-dns-resolver = {version = "0.22", optional = true}
 
 [dev-dependencies]
 criterion = {git = "https://github.com/bheisler/criterion.rs", branch = "version-0.4", default-features = false}
-submillisecond = {git = "https://github.com/lunatic-solutions/submillisecond", features = [
+submillisecond = {path = "../submillisecond", features = [
   "cookies",
   "json",
   "logging",

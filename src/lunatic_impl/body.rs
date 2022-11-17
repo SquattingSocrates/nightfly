@@ -42,8 +42,8 @@ impl From<()> for Body {
 }
 
 impl From<HttpResponse> for Body {
-    fn from(body: HttpResponse) -> Self {
-        body.into()
+    fn from(res: HttpResponse) -> Self {
+        res.body.into()
     }
 }
 

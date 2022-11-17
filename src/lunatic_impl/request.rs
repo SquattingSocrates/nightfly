@@ -725,12 +725,13 @@ impl<'a> PendingRequest<'a> {
         {
             if let Some(ref cookie_store) = self.client.cookie_store {
                 let mut cookies =
-                    cookie::extract_response_cookie_headers(&self.res.headers()).peekable();
+                    cookie::extract_response_cookie_headers(self.res.headers()).peekable();
                 if cookies.peek().is_some() {
                     cookie_store.set_cookies(&mut cookies, &self.req.url);
                 }
             }
         }
+        self.urls.push(self.req.url.clone());
         let should_redirect = match self.res.status() {
             StatusCode::MOVED_PERMANENTLY | StatusCode::FOUND | StatusCode::SEE_OTHER => {
                 // self.body = None;
@@ -791,8 +792,7 @@ impl<'a> PendingRequest<'a> {
                         headers.insert(REFERER, referer);
                     }
                 }
-                let url = self.req.url.clone();
-                self.urls.push(url);
+
                 let action = self
                     .client
                     .redirect_policy
@@ -811,9 +811,13 @@ impl<'a> PendingRequest<'a> {
                             return Err(error::redirect(error::url_bad_scheme(loc.clone()), loc));
                         }
 
-                        self.req.url = loc;
+                        self.req.url = loc.clone();
 
                         remove_sensitive_headers(&mut headers, &self.req.url, &self.urls);
+
+                        // push new url to chain of redirects
+                        self.urls.push(loc);
+
                         let mut req = Request::new(
                             // it's fine to unwrap here because the method was constructed with a valid builder
                             Method::from_str(self.req.method.as_str()).unwrap(),
@@ -845,6 +849,10 @@ impl<'a> PendingRequest<'a> {
             }
         }
 
+        if !self.urls.is_empty() {
+            self.res.url = self.urls.last().unwrap().clone();
+        }
+        self.res.redirect_chain = self.urls;
         Ok(self.res)
     }
 }

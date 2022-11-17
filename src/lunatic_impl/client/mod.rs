@@ -30,6 +30,8 @@ use crate::lunatic_impl::{
 use crate::redirect;
 pub use crate::{Body, ClientBuilder};
 use crate::{IntoUrl, Method, Url};
+#[cfg(feature = "cookies")]
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct InnerClient {
@@ -111,6 +113,7 @@ impl RequestHandler<ExecuteRequest> for InnerClient {
             version: res.version,
             headers: hashmap_from_header_map(res.headers),
             url: res.url,
+            redirect_chain: res.redirect_chain,
         })
     }
 }
@@ -289,7 +292,7 @@ impl InnerClient {
 
         #[cfg(feature = "cookies")]
         {
-            if let Some(_) = self.cookie_store {
+            if self.cookie_store.is_some() {
                 f.field("cookie_store", &true);
             }
         }

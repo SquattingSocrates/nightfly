@@ -49,7 +49,7 @@ fn dst_post() -> SubmsResponse {
 }
 
 fn end_server(req: RequestContext) -> SubmsResponse {
-    println!("END SERVER {:?}", req.headers());
+    lunatic_log::info!("END SERVER {:?}", req.headers());
     assert_eq!(req.headers().get("cookie"), None);
 
     assert_eq!(

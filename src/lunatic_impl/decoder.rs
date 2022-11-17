@@ -107,6 +107,7 @@ impl Decoder {
                 version: reader.res.version().into(),
                 body,
                 url: reader.req.url.clone(),
+                redirect_chain: vec![],
             };
         }
 
@@ -142,6 +143,7 @@ impl Decoder {
             version: self.reader.res.version().into(),
             body: buf,
             url: self.reader.req.url.clone(),
+            redirect_chain: vec![],
         }
     }
 

@@ -1,4 +1,6 @@
 use core::fmt;
+#[cfg(feature = "cookies")]
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     convert::TryInto,

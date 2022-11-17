@@ -106,31 +106,28 @@ impl<'a> fmt::Debug for Cookie<'a> {
     }
 }
 
-pub(crate) fn extract_response_cookie_headers<'a>(
-    headers: &'a HeaderMap,
-) -> impl Iterator<Item = &'a HeaderValue> + 'a {
+pub(crate) fn extract_response_cookie_headers(
+    headers: &HeaderMap,
+) -> impl Iterator<Item = &HeaderValue> {
     headers.get_all(SET_COOKIE).iter()
 }
 
-pub(crate) fn extract_response_cookies<'a>(
-    headers: &'a HeaderMap,
-) -> impl Iterator<Item = Result<Cookie<'a>, CookieParseError>> + 'a {
-    headers
-        .get_all(SET_COOKIE)
-        .iter()
-        .map(|value| Cookie::parse(value))
+pub(crate) fn extract_response_cookies(
+    headers: &HeaderMap,
+) -> impl Iterator<Item = Result<Cookie, CookieParseError>> {
+    headers.get_all(SET_COOKIE).iter().map(Cookie::parse)
 }
 
 /// Error representing a parse failure of a 'Set-Cookie' header.
 pub(crate) struct CookieParseError(cookie_crate::ParseError);
 
-impl<'a> fmt::Debug for CookieParseError {
+impl fmt::Debug for CookieParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl<'a> fmt::Display for CookieParseError {
+impl fmt::Display for CookieParseError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.0.fmt(f)
     }
