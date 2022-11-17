@@ -66,8 +66,8 @@ flate2 = {version = "^1.0.24"}
 trust-dns-resolver = {version = "0.22", optional = true}
 
 [dev-dependencies]
-criterion = {git = "https://github.com/bheisler/criterion.rs", branch = "version-0.4", default-features = false}
-submillisecond = {path = "../submillisecond", features = [
+# criterion = {git = "https://github.com/bheisler/criterion.rs", branch = "version-0.4", default-features = false}
+submillisecond = {version = "0.2.2", features = [
   "cookies",
   "json",
   "logging",
