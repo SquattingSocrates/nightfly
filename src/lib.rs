@@ -28,10 +28,7 @@
 //!
 //! ```rust
 //! # fn run() -> Result<(), nightfly::Error> {
-//! let body = nightfly::get("https://www.rust-lang.org")
-//!     
-//!     .text()
-//!     ;
+//! let body = nightfly::get("https://www.rust-lang.org").text();
 //!
 //! println!("body = {:?}", body);
 //! # Ok(())
@@ -57,8 +54,7 @@
 //! let client = nightfly::Client::new();
 //! let res = client.post("http://httpbin.org/post")
 //!     .body("the exact body that is sent")
-//!     .send()
-//!     ;
+//!     .send();
 //! # Ok(())
 //! # }
 //! ```
@@ -80,8 +76,7 @@
 //! let client = nightfly::Client::new();
 //! let res = client.post("http://httpbin.org/post")
 //!     .form(&params)
-//!     .send()
-//!     ;
+//!     .send();
 //! # Ok(())
 //! # }
 //! ```
@@ -105,8 +100,7 @@
 //! let client = nightfly::Client::new();
 //! let res = client.post("http://httpbin.org/post")
 //!     .json(&map)
-//!     .send()
-//!     ;
+//!     .send();
 //! # Ok(())
 //! # }
 //! ```
@@ -122,57 +116,20 @@
 //! The automatic storing and sending of session cookies can be enabled with
 //! the [`cookie_store`][ClientBuilder::cookie_store] method on `ClientBuilder`.
 //!
-//! ## Proxies
-//!
-//! **NOTE**: System proxies are enabled by default.
-//!
-//! System proxies look in environment variables to set HTTP or HTTPS proxies.
-//!
-//! `HTTP_PROXY` or `http_proxy` provide http proxies for http connections while
-//! `HTTPS_PROXY` or `https_proxy` provide HTTPS proxies for HTTPS connections.
-//!
-//! These can be overwritten by adding a [`Proxy`](Proxy) to `ClientBuilder`
-//! i.e. `let proxy = nightfly::Proxy::http("https://secure.example")?;`
-//! or disabled by calling `ClientBuilder::no_proxy()`.
-//!
-//! `socks` feature is required if you have configured socks proxy like this:
-//!
-//! ```bash
-//! export https_proxy=socks5://127.0.0.1:1086
-//! ```
-//!
-//! ## TLS
-//!
-//! By default, a `Client` will make use of system-native transport layer
-//! security to connect to HTTPS destinations. This means schannel on Windows,
-//! Security-Framework on macOS, and OpenSSL on Linux.
-//!
-//! - Additional X509 certificates can be configured on a `ClientBuilder` with the
-//!   [`Certificate`](Certificate) type.
-//! - Client certificates can be add to a `ClientBuilder` with the
-//!   [`Identity`][Identity] type.
-//! - Various parts of TLS can also be configured or even disabled on the
-//!   `ClientBuilder`.
-//!
 //! ## Optional Features
 //!
 //! The following are a list of [Cargo features][cargo-features] that can be
 //! enabled or disabled:
 //!
 //! - **cookies**: Provides cookie session support.
-//! - **multipart**: Provides functionality for multipart forms.
-//! - **socks**: Provides SOCKS5 proxy support.
 //!
 //!
-//! [hyper]: http://hyper.rs
-//! [blocking]: ./blocking/index.html
 //! [client]: ./struct.Client.html
 //! [response]: ./struct.Response.html
 //! [get]: ./fn.get.html
 //! [builder]: ./struct.RequestBuilder.html
 //! [serde]: http://serde.rs
 //! [redirect]: crate::redirect
-//! [Proxy]: ./struct.Proxy.html
 //! [cargo-features]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-features-section
 
 pub use http::header;

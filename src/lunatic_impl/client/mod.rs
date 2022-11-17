@@ -133,7 +133,8 @@ impl RequestHandler<ExecuteRequest> for InnerClient {
 /// will be processed in order, even if called at the same time from different processes.
 ///
 /// Of course, as any usual ProcessRef, the Client struct is cloneable and serialisable
-/// so it's easy to pass around between processes
+/// so it's easy to pass around between processes. A client can connect to multiple
+/// different hosts and manage different connections.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Client(pub ProcessRef<InnerClient>);
 
