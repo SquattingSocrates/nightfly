@@ -73,14 +73,14 @@ impl TryFrom<Request> for InnerRequest {
 }
 
 pub(crate) fn hashmap_from_header_map(headers: HeaderMap) -> HashMap<String, Vec<String>> {
-    let mut map = HashMap::new();
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
     let mut curr_key = String::new();
     headers.clone().into_iter().for_each(|(k, v)| {
         let (k, v) = (k.map(|x| x.to_string()), v.to_str().unwrap().to_string());
         if let Some(key) = k {
             curr_key = key;
         }
-        map.entry(curr_key.clone()).or_insert(vec![]).push(v);
+        map.entry(curr_key.clone()).or_default().push(v);
     });
     lunatic_log::debug!(
         "Transformed headers to internal structures {:?} | NEW {:?}",
