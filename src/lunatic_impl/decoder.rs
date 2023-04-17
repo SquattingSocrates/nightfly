@@ -333,17 +333,11 @@ impl HttpBodyReader {
             .any(|e| e.as_str() == "chunked")
     }
 
-    fn should_close_conn(&self) -> bool {
-        let connection_header = self.res.headers().get("connection");
-        connection_header.is_none() || connection_header.unwrap().as_bytes() == "close".as_bytes()
-    }
-
     pub fn no_content_length_required(&self) -> bool {
         let method = Method::from_str(&self.req.method).unwrap();
         let status = self.res.status();
         let status_num = status.as_u16();
         method == http::Method::HEAD
-            || (method == http::Method::GET && self.should_close_conn() && !self.is_chunked())
             || status == http::StatusCode::NO_CONTENT
             || status == http::StatusCode::NOT_MODIFIED
             || (100..200).contains(&status_num)
