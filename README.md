@@ -10,7 +10,7 @@ This project is an ongoing effort to port the reqwest library to the lunatic run
 * [x] cookies
 * [x] chunked responses
 * [x] handling of multiple open tcp streams per client
-* [ ] timeouts (not sure how this should look like in a lunatic setup)
+* [x] timeouts (needs some more testing)
 * [ ] Piping of responses (requires chunk-encoding)
 * [ ] pooling of connections (needs more usage of lib to find a good approach)
 * [ ] proxy handling
