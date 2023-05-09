@@ -116,6 +116,11 @@ impl InnerClient {
             redirect_chain: res.redirect_chain,
         })
     }
+
+    #[handle_request]
+    fn get_request_timeout(&mut self) -> Option<Duration> {
+        self.request_timeout
+    }
 }
 
 /// An http `Client` to make Requests with.
@@ -244,7 +249,16 @@ impl Client {
     /// redirect loop was detected or redirect limit was exhausted.
     pub fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
         let inner: InnerRequest = request.try_into()?;
-        let res = self.0.handle_http_request(inner)?;
+        let url = inner.url.clone();
+        let user_timeout = inner.timeout.or_else(|| self.0.get_request_timeout());
+        let res = if let Some(timeout) = user_timeout {
+            self.0
+                .with_timeout(timeout)
+                .handle_http_request(inner)
+                .unwrap_or_else(|_| Err(crate::error::timeout(url)))?
+        } else {
+            self.0.handle_http_request(inner)?
+        };
         res.try_into()
     }
 

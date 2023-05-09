@@ -1,64 +1,61 @@
-// mod support;
+#[macro_use]
+pub mod support;
 
-// use std::time::Duration;
+use std::time::Duration;
 
-// use lunatic::{
-//     abstract_process,
-//     process::{ProcessRef, StartProcess},
-//     spawn_link,
-//     supervisor::{Supervisor, SupervisorStrategy},
-//     Process, Tag,
-// };
-// use submillisecond::{response::Response as SubmsResponse, router, Application, RequestContext};
+use submillisecond::{response::Response as SubmsResponse, router};
+use support::RouterFn;
 
-// fn slow() -> SubmsResponse {
-//     // delay returning the response
-//     lunatic::sleep(Duration::from_secs(2));
-//     SubmsResponse::default()
-// }
+fn slow() -> SubmsResponse {
+    // delay returning the response
+    lunatic::sleep(Duration::from_secs(2));
+    println!("AFTER 2 seconds...");
+    SubmsResponse::default()
+}
 
-// static ROUTER: RouterFn<Vec<u8>> = router! {
-//     GET "/slow" => slow
-// };
+static ROUTER: RouterFn = router! {
+    GET "/slow" => slow
+};
 
-// static ADDR: &'static str = "0.0.0.0:3000";
+static ADDR: &'static str = "0.0.0.0:3008";
 
-// wrap_server!(server, ROUTER, ADDR);
+wrap_server!(server, ROUTER, ADDR);
 
-// #[lunatic::test]
-// fn client_timeout() {
-//     let _ = server::ensure_server();
+#[lunatic::test]
+fn client_timeout() {
+    let _ = server::ensure_server();
 
-//     let client = nightfly::Client::builder()
-//         .timeout(Duration::from_millis(500))
-//         .build()
-//         .unwrap();
+    let client = nightfly::Client::builder()
+        .timeout(Duration::from_millis(500))
+        .build()
+        .unwrap();
 
-//     let url = format!("http://{}/slow", ADDR);
+    let url = format!("http://{}/slow", ADDR);
 
-//     let res = client.get(&url).send();
+    let res = client.get(&url).send();
 
-//     let err = res.unwrap_err();
+    println!("GOT RES {res:?}");
+    let err = res.unwrap_err();
 
-//     assert!(err.is_timeout());
-//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-// }
+    assert!(err.is_timeout());
+    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+}
 
-// #[lunatic::test]
-// fn request_timeout() {
-//     let _ = server::ensure_server();
+#[lunatic::test]
+fn request_timeout() {
+    let _ = server::ensure_server();
 
-//     let client = nightfly::Client::builder().build().unwrap();
+    let client = nightfly::Client::builder().build().unwrap();
 
-//     let url = format!("http://{}/slow", ADDR);
+    let url = format!("http://{}/slow", ADDR);
 
-//     let res = client.get(&url).timeout(Duration::from_millis(500)).send();
+    let res = client.get(&url).timeout(Duration::from_millis(500)).send();
 
-//     let err = res.unwrap_err();
+    let err = res.unwrap_err();
 
-//     assert!(err.is_timeout());
-//     assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
-// }
+    assert!(err.is_timeout());
+    assert_eq!(err.url().map(|u| u.as_str()), Some(url.as_str()));
+}
 
 // #[lunatic::test]
 // fn connect_timeout() {

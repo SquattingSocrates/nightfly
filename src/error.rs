@@ -258,6 +258,10 @@ pub(crate) fn request<E: Into<BoxError>>(e: E) -> Error {
     Error::new(Kind::Request, Some(e))
 }
 
+pub(crate) fn timeout(url: Url) -> Error {
+    Error::new(Kind::Request, Some(TimedOut)).with_url(url)
+}
+
 pub(crate) fn redirect<E: Into<BoxError>>(e: E, url: Url) -> Error {
     Error::new(Kind::Redirect, Some(e)).with_url(url)
 }
@@ -339,7 +343,7 @@ mod tests {
 
     #[lunatic::test]
     fn is_timeout() {
-        let err = super::request(super::TimedOut);
+        let err = super::timeout(Url::parse("http://localhost:3000/api").unwrap());
         assert!(err.is_timeout());
 
         let io = io::Error::new(io::ErrorKind::Other, err);
