@@ -349,7 +349,9 @@ impl InnerClient {
         }
 
         if let Some(host) = url.host() {
-            headers.append("Host", HeaderValue::from_str(&host.to_string()).unwrap());
+            if !self.headers.contains_key("Host") {
+                headers.append("Host", HeaderValue::from_str(&host.to_string()).unwrap());
+            }
         }
 
         // insert default headers in the request headers
