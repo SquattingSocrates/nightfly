@@ -1,6 +1,7 @@
 mod support;
 
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 fn brotli(req: RequestContext) -> SubmsResponse {
     assert_eq!(req.method(), "HEAD");
@@ -27,7 +28,7 @@ fn accept_encoding(req: RequestContext) -> SubmsResponse {
     SubmsResponse::default()
 }
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     HEAD "/brotli" => brotli
     GET "/accept" => accept
     GET "/accept-encoding" => accept_encoding

@@ -1,3 +1,6 @@
+use lunatic::Tag;
+use serde::{Deserialize, Serialize};
+
 // TODO: remove once done converting to new support server?
 #[allow(unused)]
 pub static DEFAULT_USER_AGENT: &str =
@@ -10,17 +13,37 @@ pub static DEFAULT_USER_AGENT: &str =
 //     ServerSup::start("__server__".to_owned(), None);
 // }
 
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DummyError;
+pub struct DummyProcess;
+
+#[lunatic::abstract_process]
+impl DummyProcess {
+    #[init]
+    fn init(_: lunatic::ap::Config<Self>, _: ()) -> Result<Self, DummyError> {
+        Ok(Self)
+    }
+
+    #[terminate]
+    fn terminate(self) {
+        println!("Shutdown process");
+    }
+
+    #[handle_link_death]
+    fn handle_link_trapped(&self, _: Tag) {
+        println!("Link trapped");
+    }
+}
+
 #[macro_export]
 macro_rules! wrap_server {
     ($name:ident, $router:ident, $addr:ident) => {
         mod $name {
 
             use lunatic::{
-                abstract_process,
-                process::{ProcessRef, StartProcess},
-                spawn_link,
+                abstract_process, spawn_link,
                 supervisor::{Supervisor, SupervisorStrategy},
-                Process, Tag,
+                AbstractProcess, Process, Tag,
             };
             use submillisecond::Application;
 
@@ -30,12 +53,15 @@ macro_rules! wrap_server {
             #[abstract_process]
             impl ServerProcess {
                 #[init]
-                fn init(_: ProcessRef<Self>, _: ()) -> Self {
-                    Self(spawn_link!(|| {
+                fn init(
+                    _: lunatic::ap::Config<Self>,
+                    _: (),
+                ) -> Result<Self, crate::support::DummyError> {
+                    Ok(Self(spawn_link!(|| {
                         Application::new(super::$router)
                             .serve(super::$addr)
                             .unwrap();
-                    }))
+                    })))
                 }
 
                 #[terminate]
@@ -43,7 +69,7 @@ macro_rules! wrap_server {
                     println!("Shutdown process");
                 }
 
-                #[handle_link_trapped]
+                #[handle_link_death]
                 fn handle_link_trapped(&self, _: Tag) {
                     println!("Link trapped");
                 }
@@ -51,13 +77,13 @@ macro_rules! wrap_server {
 
             impl Supervisor for ServerSup {
                 type Arg = String;
-                type Children = ServerProcess;
+                type Children = (ServerProcess, crate::support::DummyProcess);
 
                 fn init(config: &mut lunatic::supervisor::SupervisorConfig<Self>, name: Self::Arg) {
                     // If a child fails, just restart it.
                     config.set_strategy(SupervisorStrategy::OneForOne);
                     // Start One `ServerProcess`
-                    config.children_args(((), Some(name)));
+                    config.children_args((((), None), ((), None)));
                 }
             }
 
@@ -66,8 +92,11 @@ macro_rules! wrap_server {
                 if let Some(_) = Process::<Process<()>>::lookup(&name) {
                     return;
                 }
-                ServerSup::start(name.to_owned(), None);
+                ServerSup::start(name.to_owned()).expect("should have started server");
             }
         }
     };
 }
+
+pub type RouterFn =
+    fn() -> fn(req: ::submillisecond::RequestContext) -> ::submillisecond::response::Response;

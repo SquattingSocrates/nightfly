@@ -1,6 +1,7 @@
 mod support;
 
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 fn max_age(req: RequestContext) -> SubmsResponse {
     assert_eq!(req.headers().get("cookie"), None);
@@ -82,7 +83,7 @@ fn path(req: RequestContext) -> SubmsResponse {
     }
 }
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     GET "/" => cookie_response
     GET "/1" => cookie_simple
     GET "/2" => cookie_simple

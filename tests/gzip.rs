@@ -1,6 +1,7 @@
 mod support;
 
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 fn gzip(req: RequestContext) -> SubmsResponse {
     assert_eq!(req.method(), "HEAD");
@@ -29,7 +30,7 @@ fn accept_encoding(req: RequestContext) -> SubmsResponse {
 
 static ADDR: &'static str = "0.0.0.0:3001";
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     HEAD "/gzip" => gzip
     GET "/accept" => accept
     GET "/accept-encoding" => accept_encoding

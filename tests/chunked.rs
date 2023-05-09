@@ -2,6 +2,7 @@
 pub mod support;
 
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 static CHUNKS: [&str; 10] = [
     "4\r\n",
@@ -86,7 +87,7 @@ fn chunked_deflate() -> SubmsResponse {
 
 static ADDR: &'static str = "0.0.0.0:3001";
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     GET "/chunked" => chunked
     GET "/gzip" => chunked_gzip
     GET "/deflate" => chunked_deflate

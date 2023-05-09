@@ -10,10 +10,8 @@ use std::time::Duration;
 
 use http::header::{self, Entry, HeaderMap, HeaderValue, ACCEPT_ENCODING, RANGE};
 use http::Version;
-use lunatic::process::{
-    AbstractProcess, ProcessRef, Request as LunaticRequest, RequestHandler, StartProcess,
-};
-use lunatic::Tag;
+use lunatic::ap::{AbstractProcess, Config, ProcessRef};
+use lunatic::{abstract_process, Tag};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
@@ -83,30 +81,32 @@ pub fn request_to_vec(
     request_buffer
 }
 
-impl AbstractProcess for InnerClient {
-    type Arg = ClientBuilder;
-    type State = Self;
+#[abstract_process(visibility = pub)]
+impl InnerClient {
+    // type Arg = ClientBuilder;
+    // type State = Self;
 
-    fn init(_: ProcessRef<Self>, builder: ClientBuilder) -> Self {
-        builder.build_inner().unwrap()
+    #[init]
+    fn init(_: Config<Self>, builder: ClientBuilder) -> Result<Self, crate::Error> {
+        builder.build_inner()
     }
 
-    fn terminate(_state: Self::State) {
+    #[terminate]
+    fn terminate(&self) {
         println!("Shutdown process");
     }
 
-    fn handle_link_trapped(_state: &mut Self::State, _: Tag) {
+    #[handle_link_death]
+    fn handle_link_trapped(&mut self, _: Tag) {
         println!("Link trapped");
     }
-}
 
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct ExecuteRequest(InnerRequest);
-
-impl RequestHandler<ExecuteRequest> for InnerClient {
-    type Response = crate::Result<SerializableResponse>;
-    fn handle(state: &mut Self::State, ExecuteRequest(request): ExecuteRequest) -> Self::Response {
-        let res = state.execute_request(request, vec![])?;
+    #[handle_request]
+    fn handle_http_request(
+        &mut self,
+        request: InnerRequest,
+    ) -> crate::Result<SerializableResponse> {
+        let res = self.execute_request(request, vec![])?;
         Ok(SerializableResponse {
             body: res.body,
             status: res.status.as_u16(),
@@ -141,8 +141,8 @@ pub struct Client(pub ProcessRef<InnerClient>);
 impl Default for Client {
     fn default() -> Self {
         let builder = ClientBuilder::new();
-        let proc = InnerClient::start_link(builder, None);
-        Client(proc)
+        let proc = InnerClient::link().start(builder);
+        Client(proc.expect("failed to spawn client"))
     }
 }
 
@@ -244,7 +244,7 @@ impl Client {
     /// redirect loop was detected or redirect limit was exhausted.
     pub fn execute(&mut self, request: Request) -> Result<HttpResponse, crate::Error> {
         let inner: InnerRequest = request.try_into()?;
-        let res = self.0.request(ExecuteRequest(inner))?;
+        let res = self.0.handle_http_request(inner)?;
         res.try_into()
     }
 

@@ -85,8 +85,10 @@ fn chunked_deflate() -> SubmsResponse {
 }
 
 static ADDR: &'static str = "0.0.0.0:3001";
+pub type RouterFn =
+    fn() -> fn(req: ::submillisecond::RequestContext) -> ::submillisecond::response::Response;
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     GET "/chunked" => chunked
     GET "/gzip" => chunked_gzip
     GET "/deflate" => chunked_deflate

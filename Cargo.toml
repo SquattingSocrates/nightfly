@@ -36,8 +36,8 @@ http = "0.2"
 http-body = "0.4.5"
 httparse = "1.7.1"
 ipnet = "2.5.0"
-lunatic = "0.12.0"
-lunatic-log = "0.3"
+lunatic = "0.13.1"
+lunatic-log = "0.4"
 mime = "0.3.16"
 percent-encoding = "2.2.0"
 serde = "1.0"
@@ -65,7 +65,7 @@ flate2 = {version = "^1.0.24"}
 
 [dev-dependencies]
 # criterion = {git = "https://github.com/bheisler/criterion.rs", branch = "version-0.4", default-features = false}
-submillisecond = {version = "0.2.2", features = [
+submillisecond = {version = "0.3", features = [
   "cookies",
   "json",
   "logging",

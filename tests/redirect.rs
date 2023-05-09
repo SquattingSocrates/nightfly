@@ -2,6 +2,7 @@
 pub mod support;
 
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 fn redirect(code: u16) -> SubmsResponse {
     http::Response::builder()
@@ -122,7 +123,7 @@ fn dst_cookie(req: RequestContext) -> SubmsResponse {
     http::Response::default()
 }
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     POST "/301" => handle_301
     POST "/302" => handle_302
     POST "/303" => handle_303
@@ -142,7 +143,7 @@ static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
     GET "/302-cookie" => handle_302_cookie
 };
 
-static END_ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static END_ROUTER: RouterFn = router! {
     GET "/end" => end_server
 };
 

@@ -17,7 +17,7 @@
 //     SubmsResponse::default()
 // }
 
-// static ROUTER: fn(RequestContext) -> SubmsResponse<Vec<u8>> = router! {
+// static ROUTER: RouterFn<Vec<u8>> = router! {
 //     GET "/slow" => slow
 // };
 

@@ -5,6 +5,7 @@ use nightfly::Client;
 
 // use lunatic::net::ToSocketAddrs;
 use submillisecond::{response::Response as SubmsResponse, router, RequestContext};
+use support::RouterFn;
 
 fn text() -> SubmsResponse {
     SubmsResponse::new("Hello".into())
@@ -55,7 +56,7 @@ fn pipe_response(body: Vec<u8>, _headers: HeaderMap) -> SubmsResponse {
     SubmsResponse::default()
 }
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     GET "/text" => text
     GET "/user-agent" => user_agent
     GET "/auto_headers" => auto_headers

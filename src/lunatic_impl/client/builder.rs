@@ -12,7 +12,7 @@ use http::{
     header::{ACCEPT, USER_AGENT},
     HeaderMap, HeaderValue,
 };
-use lunatic::process::StartProcess;
+use lunatic::AbstractProcess;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cookies")]
@@ -320,7 +320,9 @@ impl ClientBuilder {
 
         // let proxies_maybe_http_auth = proxies.iter().any(|p| p.maybe_has_http_auth());
 
-        let proc = InnerClient::start_link(self, None);
+        let proc = InnerClient::link()
+            .start(self)
+            .expect("Failed to spawn InnerClient");
         Ok(Client(proc))
     }
 

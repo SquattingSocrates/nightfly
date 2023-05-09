@@ -3,6 +3,7 @@ mod support;
 use http::{HeaderMap, HeaderValue};
 use nightfly::StatusCode;
 use submillisecond::{response::Response as SubmsResponse, router, Json, RequestContext};
+use support::RouterFn;
 
 fn index() -> &'static str {
     "Hello"
@@ -65,7 +66,7 @@ fn appended_headers(headers: HeaderMap) -> SubmsResponse {
 
 static ADDR: &'static str = "0.0.0.0:3000";
 
-static ROUTER: fn(RequestContext) -> SubmsResponse = router! {
+static ROUTER: RouterFn = router! {
     GET "/text" => index
     GET "/non_utf8_text" => non_utf8_text
     GET "/1" => empty_response
@@ -238,6 +239,7 @@ fn test_default_headers() {
     let res = client.get(&url).send().unwrap();
 
     assert_eq!(res.url().as_str(), &url);
+    println!("GOT DEFAULT HEADERS {res:?}");
     assert_eq!(res.status(), nightfly::StatusCode::OK);
 }
 

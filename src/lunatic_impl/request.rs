@@ -38,7 +38,7 @@ pub struct Request {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct InnerRequest {
+pub struct InnerRequest {
     pub(crate) method: String,
     pub(crate) url: Url,
     pub(crate) headers: HashMap<String, Vec<String>>,
